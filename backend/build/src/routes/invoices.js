@@ -1,0 +1,152 @@
+import { Router } from 'express';
+import { v4 as uuidv4 } from 'uuid';
+import { findAll, findById, insert, update, remove } from '../db/index.js';
+import { requireRole } from '../middleware/auth.js';
+
+const router = Router();
+
+async function generateInvoiceNumber() {
+  const year = new Date().getFullYear();
+  const all = await findAll('invoices');
+  const invoices = all.filter(i => i.invoice_number?.startsWith(`INV-${year}-`));
+  const maxNum = invoices.reduce((max, i) => { const num = parseInt(i.invoice_number.split('-')[2]) || 0; return num > max ? num : max; }, 0);
+  return `INV-${year}-${String(maxNum + 1).padStart(4, '0')}`;
+}
+
+// Get all invoices
+router.get('/', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const { status, client_id } = req.query;
+    
+    let invoices = await findAll('invoices');
+    
+    if (status) invoices = invoices.filter(i => i.status === status);
+    if (client_id) invoices = invoices.filter(i => i.client_id === client_id);
+    
+    // Add client name and parse items
+    const result = await Promise.all(invoices.map(async (inv) => {
+      const client = await findById('clients', inv.client_id);
+      return {
+        ...inv,
+        client_name: client?.company_name,
+        items: JSON.parse(inv.items || '[]'),
+      };
+    }));
+    
+    res.json(result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
+  } catch (error) {
+    console.error('Get invoices error:', error);
+    res.status(500).json({ error: 'Failed to get invoices' });
+  }
+});
+
+// Get single invoice
+router.get('/:id', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const invoice = await findById('invoices', req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    const c = await findById('clients', invoice.client_id);
+    res.json({ ...invoice, client_name: c?.company_name, client_email: c?.email, client_address: c?.address, city: c?.city, state: c?.state, postal_code: c?.postal_code, items: typeof invoice.items === 'string' ? JSON.parse(invoice.items || '[]') : (invoice.items || []) });
+  } catch (error) {
+    console.error('Get invoice error:', error);
+    res.status(500).json({ error: 'Failed to get invoice' });
+  }
+});
+
+// Create invoice
+router.post('/', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const { client_id, ticket_id, issue_date, due_date, items, tax_rate, notes } = req.body;
+    
+    if (!client_id || !issue_date || !due_date || !items || !items.length) {
+      return res.status(400).json({ error: 'Client, dates, and items are required' });
+    }
+    
+    const now = new Date().toISOString();
+    const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
+    const tax = subtotal * ((tax_rate || 6) / 100);
+    const total = subtotal + tax;
+    
+    const invoice = {
+      id: uuidv4(),
+      invoice_number: await generateInvoiceNumber(),
+      client_id,
+      ticket_id: ticket_id || null,
+      issue_date,
+      due_date,
+      items: JSON.stringify(items),
+      subtotal,
+      tax,
+      total,
+      paid_amount: 0,
+      notes: notes || '',
+      status: 'draft',
+      created_at: now,
+      updated_at: now,
+      created_by: req.user.id,
+      updated_by: req.user.id,
+    };
+    
+    await insert('invoices', invoice);
+    res.status(201).json({ ...invoice, items });
+  } catch (error) {
+    console.error('Create invoice error:', error);
+    res.status(500).json({ error: 'Failed to create invoice' });
+  }
+});
+
+// Update invoice
+router.put('/:id', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const { issue_date, due_date, items, tax_rate, notes, status } = req.body;
+    const now = new Date().toISOString();
+    const updates = { updated_at: now, updated_by: req.user.id };
+    if (issue_date) updates.issue_date = issue_date;
+    if (due_date) updates.due_date = due_date;
+    if (notes !== undefined) updates.notes = notes;
+    if (status) updates.status = status;
+    if (items) { const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0); const tax = subtotal * ((tax_rate || 6) / 100); updates.items = JSON.stringify(items); updates.subtotal = subtotal; updates.tax = tax; updates.total = subtotal + tax; }
+    const invoice = await update('invoices', req.params.id, updates);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    res.json({ ...invoice, items: typeof invoice.items === 'string' ? JSON.parse(invoice.items) : (invoice.items || []) });
+  } catch (error) {
+    console.error('Update invoice error:', error);
+    res.status(500).json({ error: 'Failed to update invoice' });
+  }
+});
+
+// Record payment
+router.patch('/:id/payment', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const { amount } = req.body;
+    if (typeof amount !== 'number' || amount <= 0) return res.status(400).json({ error: 'Valid payment amount is required' });
+    const now = new Date().toISOString();
+    const invoice = await findById('invoices', req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    const newPaidAmount = (invoice.paid_amount || 0) + amount;
+    const newStatus = newPaidAmount >= invoice.total ? 'paid' : invoice.status;
+    const client = await findById('clients', invoice.client_id);
+    if (client) await update('clients', invoice.client_id, { total_revenue: (client.total_revenue || 0) + amount });
+    const updated = await update('invoices', req.params.id, { paid_amount: newPaidAmount, status: newStatus, updated_at: now, updated_by: req.user.id });
+    res.json({ ...updated, items: typeof updated.items === 'string' ? JSON.parse(updated.items) : (updated.items || []) });
+  } catch (error) {
+    console.error('Record payment error:', error);
+    res.status(500).json({ error: 'Failed to record payment' });
+  }
+});
+
+// Delete invoice
+router.delete('/:id', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
+  try {
+    const invoice = await findById('invoices', req.params.id);
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (invoice.status === 'paid') return res.status(400).json({ error: 'Cannot delete paid invoice' });
+    await remove('invoices', req.params.id);
+    res.json({ message: 'Invoice deleted successfully' });
+  } catch (error) {
+    console.error('Delete invoice error:', error);
+    res.status(500).json({ error: 'Failed to delete invoice' });
+  }
+});
+
+export { router as invoiceRoutes };

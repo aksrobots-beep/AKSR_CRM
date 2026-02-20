@@ -1,0 +1,13 @@
+export { Login } from './Login';
+export { Dashboard } from './Dashboard';
+export { CEODashboard } from './CEODashboard';
+export { ServiceTickets } from './ServiceTickets';
+export { Clients } from './Clients';
+export { EquipmentPage } from './Equipment';
+export { Inventory } from './Inventory';
+export { HR } from './HR';
+export { Accounts } from './Accounts';
+export { Users } from './Users';
+export { Settings } from './Settings';
+export { Employees } from './Employees';
+export { Suppliers } from './Suppliers';

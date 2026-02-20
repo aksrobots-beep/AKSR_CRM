@@ -1,0 +1,32 @@
+{
+  "name": "ak-success-crm-backend",
+  "version": "1.0.0",
+  "description": "Backend API for AK Success CRM",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "init-db": "node src/db/init.js",
+    "init-mysql": "node src/db/init-mysql.js",
+    "import-robot-records": "node src/scripts/import-robot-service-records.js",
+    "reset-password": "node src/scripts/reset-password.js",
+    "diagnose-login": "node src/scripts/diagnose-login.js",
+    "setup-local": "node setup-local-db.js",
+    "migrate-is-active": "node src/scripts/add-is-active-columns.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "lowdb": "^7.0.1",
+    "mysql2": "^3.6.5",
+    "uuid": "^9.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "archiver": "^7.0.1"
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "ak-success-crm",
+  "version": "1.0.0",
+  "description": "Industry-focused CRM for AK Success Sdn Bhd - Kitchen Equipment & Robot Service Management",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:zip": "npm run build && npm run zip",
+    "zip": "powershell -NoProfile -Command \"Compress-Archive -Path dist/* -DestinationPath ../frontend-production.zip -Force\"",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "date-fns": "^3.3.1",
+    "lucide-react": "^0.312.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.22.0",
+    "zustand": "^4.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.30",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.7.0",
+    "autoprefixer": "^10.4.17",
+    "path": "^0.12.7",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "terser": "^5.44.1",
+    "typescript": "^5.9.3",
+    "url": "^0.11.4",
+    "vite": "^5.4.21"
+  }
+}

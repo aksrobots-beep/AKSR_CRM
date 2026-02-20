@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build output
+frontend/dist/
+backend-production.zip
+frontend-production.zip
+
+# Environment files (contain secrets)
+backend/.env
+frontend/.env
+
+# IDE
+.vscode/
+.cursor/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*

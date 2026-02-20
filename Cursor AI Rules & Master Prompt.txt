@@ -1,0 +1,273 @@
+# Cursor AI Rules & Master Prompt
+## AK Success CRM (Monday.com–Style, Industry-Focused)
+
+---
+
+## 📌 Project Identity
+
+This project is an **internal CRM & Service ERP** for:
+
+**AK Success Sdn Bhd**
+
+The system manages:
+- Client Management
+- Kitchen Equipment
+- Robot Deployment & Maintenance
+- Service Tickets
+- Inventory & Spare Parts
+- Employees
+- HR & Leave Management
+- Accounts & Finance
+- Custom Workspaces
+- Kanban Boards
+- CEO, Admin, User Dashboards
+
+This system is **inspired by Monday.com**, but it is **NOT a generic clone**.
+It is **industry-specific for robotics & kitchen equipment service companies**.
+
+---
+
+## 🧠 Core Product Principles
+
+- Kanban-first workflows
+- Clean, executive-friendly UI
+- Role-based access control
+- Strong data linking across modules
+- Auditability and traceability
+- Modular and scalable design
+
+---
+
+## 🧱 Architecture Rules
+
+- Use **module-based architecture**
+- Each module must include:
+  - Data model
+  - Business logic / service layer
+  - UI components
+- Avoid tight coupling between modules
+- Shared utilities must live in a `shared` or `common` layer
+
+Modules include:
+- clients
+- service
+- robots
+- inventory
+- hr
+- leave
+- accounts
+- users
+- dashboards
+
+---
+
+## 🎨 UI & UX Rules (Monday.com Style)
+
+- Clean, flat, modern UI
+- Left sidebar for workspaces
+- Board-based main layout
+- Support views:
+  - Kanban
+  - Table
+  - Calendar
+  - Dashboard
+- Drag-and-drop interactions
+- Minimal clutter
+- CEO views must be KPI-focused only
+
+---
+
+## 📋 Kanban Board Rules
+
+Kanban boards must support:
+- Drag & drop between statuses
+- Status columns
+- Assigned users
+- Due dates
+- Priority levels
+- Filters and saved views
+
+Status changes must:
+- Be logged (audit trail)
+- Trigger automation hooks (notifications, SLA checks)
+
+---
+
+## 🔗 Data & Entity Rules
+
+All core entities must include:
+- ID
+- Status
+- Created date
+- Updated date
+- Created by
+- Last updated by
+
+Mandatory relationships:
+- Client ↔ Service Ticket
+- Service Ticket ↔ Robot / Equipment
+- Service Ticket ↔ Inventory (parts used)
+- Client ↔ Invoice
+- Employee ↔ Leave Request
+
+---
+
+## 🔐 Roles & Permissions
+
+Role-based access control is mandatory.
+
+### Core Roles
+- CEO
+- Admin
+- Service Manager
+- Technician
+- Sales / Account Manager
+- HR Manager
+- Accounts / Finance
+- Inventory Officer
+
+Rules:
+- CEO: read-all + approvals
+- Users: see assigned data only
+- HR & Accounts data must be restricted
+- Permissions must be configurable
+
+---
+
+## 🚫 What NOT To Do
+
+- Do NOT build features outside CRM scope
+- Do NOT hardcode business logic
+- Do NOT mix UI and business logic
+- Do NOT bypass audit trails
+- Do NOT expose HR or finance data to unauthorized users
+
+---
+
+## 🤖 AI Behavior Rules (Cursor)
+
+When generating code:
+1. Identify the module first
+2. Identify the user role
+3. Identify linked entities
+4. Follow existing project structure
+5. Match naming conventions
+6. Prefer explicit, readable logic
+
+Failure to follow these rules is considered a bug.
+
+---
+
+# 🧠 MASTER DEVELOPMENT PROMPT (Use in Cursor Chat)
+
+You are a senior product engineer building an industry-focused CRM inspired by Monday.com for AK Success Sdn Bhd.
+
+Context:
+
+This CRM manages clients, kitchen equipment, robots, service & maintenance, inventory, HR, leave, and accounts.
+
+The system uses Monday.com-style concepts: workspaces, boards, kanban, statuses, dashboards, and automations.
+
+This is NOT a generic CRM. It is service & maintenance heavy.
+
+Core principles:
+
+Clean UI
+
+Kanban-first workflows
+
+Role-based dashboards (CEO, Admin, User)
+
+Strong linking between modules
+
+Full auditability
+
+Your task:
+
+Follow the Cursor Rules strictly.
+
+Build features as modular components.
+
+Keep UX simple and executive-friendly.
+
+Prefer explicit logic over abstractions.
+
+Every feature must align with:
+
+Client Management
+
+Service Ticket Lifecycle
+
+Robot Maintenance
+
+Inventory Usage
+
+HR & Leave Approval
+
+Accounts Visibility
+
+UI expectations:
+
+Monday.com-style layout
+
+Left sidebar with workspaces
+
+Board-based content
+
+Kanban, Table, Calendar views
+
+Clean KPI dashboards
+
+Before writing code:
+
+Identify the module
+
+Identify the user role
+
+Identify related entities
+
+Output expectations:
+
+Production-ready code
+
+Clean structure
+
+Minimal but clear comments
+
+No unnecessary explanations unless requested
+
+If anything is unclear, make a reasonable assumption and proceed.
+
+
+---
+
+## 🔧 Feature-Level Prompt Template (Optional)
+
+
+
+Build the [MODULE NAME] module for AK Success CRM.
+
+Requirements:
+
+Monday.com-style Kanban board
+
+Status workflow clearly defined
+
+Role-based access control
+
+Audit logs for status changes
+
+Links to related entities
+
+User roles:
+
+Manager (full access)
+
+User (assigned only)
+
+CEO (read-only KPI view)
+
+Follow Cursor Rules and maintain clean architecture.
+
+
+---

@@ -1,0 +1,100 @@
+{
+  "info": {
+    "name": "AK Success CRM - Production Login Test",
+    "description": "Test collection for verifying production login",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://api-crm.aksuccessrobotics.com.my/api/health",
+          "protocol": "https",
+          "host": ["api-crm", "aksuccessrobotics", "com", "my"],
+          "path": ["api", "health"]
+        },
+        "description": "Check if backend API is running"
+      },
+      "response": []
+    },
+    {
+      "name": "2. Login - Admin",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"admin@aksuccess.com.my\",\n  \"password\": \"admin123\"\n}"
+        },
+        "url": {
+          "raw": "https://api-crm.aksuccessrobotics.com.my/api/auth/login",
+          "protocol": "https",
+          "host": ["api-crm", "aksuccessrobotics", "com", "my"],
+          "path": ["api", "auth", "login"]
+        },
+        "description": "Test admin login with credentials:\n- Email: admin@aksuccess.com.my\n- Password: admin123"
+      },
+      "response": []
+    },
+    {
+      "name": "3. Get Current User",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text",
+            "description": "Replace {{token}} with actual token from login response"
+          }
+        ],
+        "url": {
+          "raw": "https://api-crm.aksuccessrobotics.com.my/api/auth/me",
+          "protocol": "https",
+          "host": ["api-crm", "aksuccessrobotics", "com", "my"],
+          "path": ["api", "auth", "me"]
+        },
+        "description": "Verify token works by getting current user info"
+      },
+      "response": []
+    },
+    {
+      "name": "4. Get All Users (Admin Only)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "https://api-crm.aksuccessrobotics.com.my/api/auth/users",
+          "protocol": "https",
+          "host": ["api-crm", "aksuccessrobotics", "com", "my"],
+          "path": ["api", "auth", "users"]
+        },
+        "description": "Test admin permissions by fetching all users"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT token from login response"
+    }
+  ]
+}
