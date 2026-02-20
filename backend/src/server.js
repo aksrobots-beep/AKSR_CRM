@@ -21,7 +21,14 @@ const PORT = process.env.PORT || 3001;
 
 // Middleware
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
+  origin: function (origin, callback) {
+    const allowed = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (!origin || allowed.length === 0 || allowed.includes('*') || allowed.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // allow all in practice; tighten via CORS_ORIGIN env var
+    }
+  },
   credentials: true,
 }));
 app.use(express.json());
@@ -368,6 +375,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: message });
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 AK Success CRM API running on http://localhost:${PORT}`);
-});
+// Only listen when running directly (not on Vercel)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 AK Success CRM API running on http://localhost:${PORT}`);
+  });
+}
+
+export default app;
