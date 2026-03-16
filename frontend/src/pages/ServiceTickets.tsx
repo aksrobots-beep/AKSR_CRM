@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { Header } from '../components/layout';
-import { KanbanBoard, DataTable, Calendar, type KanbanColumnDef, type Column } from '../components/ui';
+import { KanbanBoard, DataTable, Calendar, DatePickerField, type KanbanColumnDef, type Column } from '../components/ui';
 import { useAppStore } from '../stores/appStore';
 import { useAuthStore } from '../stores/authStore';
 import type { ServiceTicket, TicketStatus } from '../types';
@@ -41,6 +41,7 @@ export function ServiceTickets() {
     due_date: '',
     next_action_date: '',
     next_action_item: '',
+    is_billable: true,
   });
   const [editData, setEditData] = useState({ 
     title: '', 
@@ -52,6 +53,7 @@ export function ServiceTickets() {
     next_action_date: '',
     next_action_item: '',
     action_taken: '',
+    is_billable: true,
   });
 
   const isTechnician = user?.role === 'technician';
@@ -82,7 +84,7 @@ export function ServiceTickets() {
     try {
       await addTicket(formData as any);
       setShowAddModal(false);
-      setFormData({ title: '', description: '', priority: 'medium', client_id: '', assigned_to: '', due_date: '', next_action_date: '', next_action_item: '' });
+      setFormData({ title: '', description: '', priority: 'medium', client_id: '', assigned_to: '', due_date: '', next_action_date: '', next_action_item: '', is_billable: true });
     } catch (error) {
       console.error('Failed to add ticket:', error);
     }
@@ -99,7 +101,7 @@ export function ServiceTickets() {
       await updateTicket(selectedTicket.id, editData as any);
       setShowEditModal(false);
       setSelectedTicket(null);
-      setEditData({ title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', due_date: '', next_action_date: '', next_action_item: '', action_taken: '' });
+      setEditData({ title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', due_date: '', next_action_date: '', next_action_item: '', action_taken: '', is_billable: true });
     } catch (error) {
       console.error('Failed to update ticket:', error);
     }
@@ -129,6 +131,7 @@ export function ServiceTickets() {
       next_action_date: selectedTicket.nextActionDate ? format(new Date(selectedTicket.nextActionDate), 'yyyy-MM-dd') : '',
       next_action_item: selectedTicket.nextActionItem || '',
       action_taken: selectedTicket.actionTaken || '',
+      is_billable: selectedTicket.isBillable !== false,
     });
     setShowEditModal(true);
   };
@@ -217,7 +220,7 @@ export function ServiceTickets() {
     { key: 'clientId', header: 'Client', searchable: true, render: (ticket) => { const client = clients.find((c) => c.id === ticket.clientId); return <span>{client?.companyName || '-'}</span>; } },
     { 
       key: 'equipmentId', 
-      header: 'Equipment', 
+      header: 'Contract', 
       searchable: true, 
       render: (ticket) => {
         const relatedEquipment = equipment.find(eq => eq.id === ticket.equipmentId);
@@ -252,6 +255,7 @@ export function ServiceTickets() {
     },
     { key: 'priority', header: 'Priority', sortable: true, render: (ticket) => { const colors: Record<string, string> = { low: 'badge-neutral', medium: 'badge-primary', high: 'badge-warning', critical: 'badge-danger' }; return <span className={`badge ${colors[ticket.priority]}`}>{ticket.priority}</span>; } },
     { key: 'status', header: 'Status', sortable: true, render: (ticket) => { const colors: Record<string, string> = { new: 'bg-primary-100 text-primary-700', assigned: 'bg-purple-100 text-purple-700', in_progress: 'bg-warning-100 text-warning-700', pending_parts: 'bg-orange-100 text-orange-700', on_hold: 'bg-neutral-100 text-neutral-700', resolved: 'bg-success-100 text-success-700', closed: 'bg-neutral-200 text-neutral-700' }; return <span className={`badge ${colors[ticket.status]}`}>{ticket.status.replace('_', ' ')}</span>; } },
+    { key: 'isBillable', header: 'Billable', sortable: true, render: (ticket) => (ticket.isBillable !== false ? <span className="badge bg-success-100 text-success-700">Billable</span> : <span className="badge bg-neutral-200 text-neutral-600">Non-billable</span>) },
     {
       key: 'isActive',
       header: 'Active',
@@ -399,16 +403,51 @@ export function ServiceTickets() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Due Date</label>
-                  <input type="date" className="input" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} readOnly value={formData.due_date} onKeyDown={(e) => e.preventDefault()} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} />
+                  <DatePickerField
+                    value={formData.due_date}
+                    onChange={(v) => setFormData({ ...formData, due_date: v })}
+                    min={DATE_INPUT_MIN}
+                    max={DATE_INPUT_MAX}
+                  />
                 </div>
                 <div>
                   <label className="label">Next Action Date</label>
-                  <input type="date" className="input" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} readOnly value={formData.next_action_date} onKeyDown={(e) => e.preventDefault()} onChange={(e) => setFormData({ ...formData, next_action_date: e.target.value })} />
+                  <DatePickerField
+                    value={formData.next_action_date}
+                    onChange={(v) => setFormData({ ...formData, next_action_date: v })}
+                    min={DATE_INPUT_MIN}
+                    max={DATE_INPUT_MAX}
+                  />
                 </div>
               </div>
               <div>
                 <label className="label">Next Action Item</label>
                 <input type="text" className="input" value={formData.next_action_item} onChange={(e) => setFormData({ ...formData, next_action_item: e.target.value })} placeholder="What needs to be done next?" />
+              </div>
+              <div>
+                <label className="label">Billing</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable"
+                      checked={formData.is_billable === true}
+                      onChange={() => setFormData({ ...formData, is_billable: true })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Billable</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable"
+                      checked={formData.is_billable === false}
+                      onChange={() => setFormData({ ...formData, is_billable: false })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Non-billable</span>
+                  </label>
+                </div>
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary flex-1">Cancel</button>
@@ -469,11 +508,21 @@ export function ServiceTickets() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Due Date</label>
-                  <input type="date" className="input" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} readOnly value={editData.due_date} onKeyDown={(e) => e.preventDefault()} onChange={(e) => setEditData({ ...editData, due_date: e.target.value })} />
+                  <DatePickerField
+                    value={editData.due_date}
+                    onChange={(v) => setEditData({ ...editData, due_date: v })}
+                    min={DATE_INPUT_MIN}
+                    max={DATE_INPUT_MAX}
+                  />
                 </div>
                 <div>
                   <label className="label">Next Action Date</label>
-                  <input type="date" className="input" min={DATE_INPUT_MIN} max={DATE_INPUT_MAX} readOnly value={editData.next_action_date} onKeyDown={(e) => e.preventDefault()} onChange={(e) => setEditData({ ...editData, next_action_date: e.target.value })} />
+                  <DatePickerField
+                    value={editData.next_action_date}
+                    onChange={(v) => setEditData({ ...editData, next_action_date: v })}
+                    min={DATE_INPUT_MIN}
+                    max={DATE_INPUT_MAX}
+                  />
                 </div>
               </div>
               <div>
@@ -483,6 +532,31 @@ export function ServiceTickets() {
               <div>
                 <label className="label">Action Taken / Notes</label>
                 <textarea className="input min-h-[100px]" value={editData.action_taken} onChange={(e) => setEditData({ ...editData, action_taken: e.target.value })} placeholder="Document actions taken, findings, updates..." />
+              </div>
+              <div>
+                <label className="label">Billing</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="edit-billable"
+                      checked={editData.is_billable === true}
+                      onChange={() => setEditData({ ...editData, is_billable: true })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Billable</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="edit-billable"
+                      checked={editData.is_billable === false}
+                      onChange={() => setEditData({ ...editData, is_billable: false })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Non-billable</span>
+                  </label>
+                </div>
               </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowEditModal(false)} className="btn-secondary flex-1">Cancel</button>
@@ -580,6 +654,15 @@ export function ServiceTickets() {
                   <div>
                     <p className="text-xs text-neutral-500 uppercase tracking-wider">Assigned To</p>
                     <p className="font-medium">{getAssigneeName(selectedTicket) || 'Unassigned'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-neutral-100 flex items-center justify-center">
+                    <Tag className="w-5 h-5 text-neutral-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-neutral-500 uppercase tracking-wider">Billing</p>
+                    <p className="font-medium">{selectedTicket.isBillable !== false ? 'Billable' : 'Non-billable'}</p>
                   </div>
                 </div>
               </div>

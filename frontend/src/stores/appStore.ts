@@ -57,7 +57,7 @@ interface AppState {
   // Inventory Actions
   addInventoryItem: (item: Partial<InventoryItem>) => Promise<InventoryItem>;
   updateInventoryItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>;
-  adjustStock: (id: string, adjustment: number, reason?: string) => Promise<void>;
+  adjustStock: (id: string, adjustment: number, reason?: string, serialNumberIds?: string[]) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
   toggleInventoryActive: (id: string, is_active: boolean) => Promise<void>;
 
@@ -261,8 +261,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().fetchInventory();
   },
 
-  adjustStock: async (id, adjustment, reason) => {
-    await api.adjustStock(id, adjustment, reason);
+  adjustStock: async (id, adjustment, reason, serialNumberIds) => {
+    await api.adjustStock(id, adjustment, reason, serialNumberIds);
     await get().fetchInventory();
   },
 
@@ -320,8 +320,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 function transformClient(data: any): Client {
   return {
     id: data.id,
+    clientCode: data.client_code || '',
     name: data.name,
     companyName: data.company_name,
+    oldCompanyName: data.old_company_name ?? '',
     email: data.email || '',
     phone: data.phone || '',
     address: data.address || '',
@@ -368,12 +370,13 @@ function transformTicket(data: any): ServiceTicket & { assignedToName?: string }
     laborCost: data.labor_cost || 0,
     partsCost: data.parts_cost || 0,
     totalCost: data.total_cost || 0,
-    tags: JSON.parse(data.tags || '[]'),
+    tags: Array.isArray(data.tags) ? data.tags : JSON.parse(data.tags || '[]'),
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),
     createdBy: data.created_by || '',
     updatedBy: data.updated_by || '',
     isActive: data.is_active === 1 || data.is_active === true || data.is_active === undefined || data.is_active === null,
+    isBillable: data.is_billable === undefined || data.is_billable === null || data.is_billable === 1 || data.is_billable === true,
   };
 }
 
@@ -406,6 +409,23 @@ function transformEquipment(data: any): Equipment {
     amcAmount: data.amc_amount || undefined,
     amcTerms: data.amc_terms || undefined,
     amcRenewalStatus: data.amc_renewal_status || undefined,
+    simCards: Array.isArray(data.sim_cards)
+      ? data.sim_cards.map((sc: any) => ({
+          id: sc.id,
+          simNumber: sc.sim_number || '',
+          simCarrier: sc.sim_carrier,
+          simPhoneNumber: sc.sim_phone_number,
+          simTopUpDate: sc.sim_top_up_date ? new Date(sc.sim_top_up_date) : undefined,
+          simExpiredDate: sc.sim_expired_date ? new Date(sc.sim_expired_date) : undefined,
+          simReminderAt: sc.sim_reminder_at ? new Date(sc.sim_reminder_at) : undefined,
+        }))
+      : undefined,
+    simNumber: data.sim_number || (Array.isArray(data.sim_cards) && data.sim_cards[0] ? data.sim_cards[0].sim_number : undefined),
+    simCarrier: data.sim_carrier || (Array.isArray(data.sim_cards) && data.sim_cards[0] ? data.sim_cards[0].sim_carrier : undefined),
+    simPhoneNumber: data.sim_phone_number || (Array.isArray(data.sim_cards) && data.sim_cards[0] ? data.sim_cards[0].sim_phone_number : undefined),
+    simTopUpDate: data.sim_top_up_date ? new Date(data.sim_top_up_date) : (Array.isArray(data.sim_cards) && data.sim_cards[0]?.sim_top_up_date ? new Date(data.sim_cards[0].sim_top_up_date) : undefined),
+    simExpiredDate: data.sim_expired_date ? new Date(data.sim_expired_date) : (Array.isArray(data.sim_cards) && data.sim_cards[0]?.sim_expired_date ? new Date(data.sim_cards[0].sim_expired_date) : undefined),
+    simReminderAt: data.sim_reminder_at ? new Date(data.sim_reminder_at) : (Array.isArray(data.sim_cards) && data.sim_cards[0]?.sim_reminder_at ? new Date(data.sim_cards[0].sim_reminder_at) : undefined),
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),
     createdBy: data.created_by || '',
@@ -424,9 +444,11 @@ function transformInventory(data: any): InventoryItem {
     quantity: typeof data.quantity === 'number' ? data.quantity : parseInt(data.quantity) || 0,
     minQuantity: typeof data.min_quantity === 'number' ? data.min_quantity : parseInt(data.min_quantity) || 0,
     unitPrice: typeof data.unit_price === 'number' ? data.unit_price : parseFloat(data.unit_price) || 0,
+    currency: data.currency || 'MYR',
     supplier: data.supplier,
     location: data.location,
-    compatibleEquipment: JSON.parse(data.compatible_equipment || '[]'),
+    compatibleEquipment: Array.isArray(data.compatible_equipment) ? data.compatible_equipment : JSON.parse(data.compatible_equipment || '[]'),
+    trackSerialNumbers: data.track_serial_numbers === 1 || data.track_serial_numbers === true,
     status: data.status || 'active',
     createdAt: new Date(data.created_at),
     updatedAt: new Date(data.updated_at),

@@ -5,3 +5,4 @@ export { StatsCard } from './StatsCard';
 export { DataTable, type Column } from './DataTable';
 export { Calendar } from './Calendar';
 export { Input, NumberInput, PhoneInput } from './Input';
+export { DatePickerField } from './DatePickerField';

@@ -8,10 +8,16 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const rootDir = path.resolve(__dirname, '..');
-const envPath = path.join(rootDir, '.env');
+// Load from backend folder (parent of src/)
+const backendDir = path.resolve(__dirname, '..');
+const envPath = path.join(backendDir, '.env');
 
-const result = dotenv.config({ path: envPath });
+let result = dotenv.config({ path: envPath });
+if (result.error) {
+  // Fallback: try project root (e.g. when running from workspace root)
+  const projectRoot = path.resolve(backendDir, '..');
+  result = dotenv.config({ path: path.join(projectRoot, '.env') });
+}
 if (result.error && process.env.NODE_ENV === 'production') {
-  console.warn('[load-env] No .env at project root:', envPath, result.error.message);
+  console.warn('[load-env] No .env found at', envPath, ':', result.error.message);
 }

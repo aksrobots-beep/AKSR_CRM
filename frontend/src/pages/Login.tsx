@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { Mail, Lock, AlertCircle } from 'lucide-react';
 
@@ -100,6 +100,12 @@ export function Login() {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+
+          <div className="mt-4 text-right">
+            <Link to="/forgot-password" className="text-sm text-primary-600 hover:text-primary-700 font-medium">
+              Forgot password?
+            </Link>
+          </div>
 
         </div>
 

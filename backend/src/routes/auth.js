@@ -1,11 +1,99 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import { findOne, findAll, insert, update, query } from '../db/index.js';
+import { getConnection } from '../db/mysql.js';
 import { generateToken, authenticateToken } from '../middleware/auth.js';
+import { sendPasswordResetEmail } from '../services/email.js';
 import { send500 } from '../utils/errorResponse.js';
 
 const router = Router();
+const FORGOT_GENERIC_MESSAGE = 'If an account exists for this email, a reset link has been sent.';
+const RESET_TOKEN_BYTES = parseInt(process.env.RESET_TOKEN_BYTES || '32', 10);
+const RESET_TOKEN_EXPIRES_MINUTES = parseInt(process.env.RESET_TOKEN_EXPIRES_MINUTES || '30', 10);
+const FORGOT_RATE_LIMIT_EMAIL_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_MAX || '3', 10);
+const FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES || '30', 10);
+const FORGOT_RATE_LIMIT_IP_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_IP_MAX || '5', 10);
+const FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES || '15', 10);
+
+function toSqlDateTime(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
+function hashResetToken(token) {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+function getClientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) {
+    return xff.split(',')[0].trim();
+  }
+  return req.ip || req.socket?.remoteAddress || '';
+}
+
+function getResetBaseUrl(req) {
+  const envBase =
+    process.env.RESET_PASSWORD_BASE_URL ||
+    process.env.FRONTEND_URL ||
+    process.env.CLIENT_URL;
+  if (envBase) return envBase.replace(/\/+$/, '');
+
+  const host = req.get('host');
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  return `${proto}://${host}`;
+}
+
+async function findActiveUserByEmail(email) {
+  const rows = await query(
+    `SELECT id, email, name, is_active
+     FROM users
+     WHERE LOWER(TRIM(email)) = ?
+     LIMIT 1`,
+    [email]
+  );
+  const user = Array.isArray(rows) ? rows[0] : null;
+  if (!user) return null;
+  const active = user.is_active === 1 || user.is_active === true || String(user.is_active) === '1';
+  return active ? user : null;
+}
+
+async function isForgotRateLimited(email, ipAddress) {
+  const now = Date.now();
+  const emailWindowStart = toSqlDateTime(new Date(now - FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES * 60 * 1000));
+  const ipWindowStart = toSqlDateTime(new Date(now - FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES * 60 * 1000));
+
+  const emailCountRows = await query(
+    `SELECT COUNT(*) AS count
+     FROM password_reset_tokens
+     WHERE request_email = ? AND created_at >= ?`,
+    [email, emailWindowStart]
+  );
+  const emailCount = Number(emailCountRows?.[0]?.count || 0);
+  if (emailCount >= FORGOT_RATE_LIMIT_EMAIL_MAX) {
+    return true;
+  }
+
+  if (ipAddress) {
+    const ipCountRows = await query(
+      `SELECT COUNT(*) AS count
+       FROM password_reset_tokens
+       WHERE request_ip = ? AND created_at >= ?`,
+      [ipAddress, ipWindowStart]
+    );
+    const ipCount = Number(ipCountRows?.[0]?.count || 0);
+    if (ipCount >= FORGOT_RATE_LIMIT_IP_MAX) {
+      return true;
+    }
+  }
+
+  return false;
+}
 
 // Login
 router.post('/login', async (req, res) => {
@@ -101,6 +189,202 @@ router.post('/login', async (req, res) => {
     });
   } catch (error) {
     send500(res, 'Login failed', error);
+  }
+});
+
+// Forgot password request (public)
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const email = normalizeEmail(req.body?.email);
+    const ipAddress = getClientIp(req);
+    const userAgent = String(req.get('user-agent') || '').slice(0, 255);
+
+    if (!email) {
+      return res.json({ message: FORGOT_GENERIC_MESSAGE });
+    }
+
+    const limited = await isForgotRateLimited(email, ipAddress);
+    if (limited) {
+      return res.status(429).json({ error: 'Too many reset requests. Please try again later.' });
+    }
+
+    const user = await findActiveUserByEmail(email);
+
+    if (!user) {
+      await insert('password_reset_tokens', {
+        id: uuidv4(),
+        user_id: null,
+        request_email: email,
+        token_hash: null,
+        request_ip: ipAddress,
+        user_agent: userAgent,
+        expires_at: null,
+        used_at: null,
+        invalidated_at: null,
+      });
+      return res.json({ message: FORGOT_GENERIC_MESSAGE });
+    }
+
+    const rawToken = crypto.randomBytes(RESET_TOKEN_BYTES).toString('hex');
+    const tokenHash = hashResetToken(rawToken);
+    const expiresAt = toSqlDateTime(new Date(Date.now() + RESET_TOKEN_EXPIRES_MINUTES * 60 * 1000));
+
+    await query(
+      `UPDATE password_reset_tokens
+       SET invalidated_at = NOW(), updated_at = NOW()
+       WHERE user_id = ? AND used_at IS NULL AND invalidated_at IS NULL`,
+      [user.id]
+    );
+
+    await insert('password_reset_tokens', {
+      id: uuidv4(),
+      user_id: user.id,
+      request_email: email,
+      token_hash: tokenHash,
+      request_ip: ipAddress,
+      user_agent: userAgent,
+      expires_at: expiresAt,
+      used_at: null,
+      invalidated_at: null,
+    });
+
+    const resetBaseUrl = getResetBaseUrl(req);
+    const resetLink = `${resetBaseUrl}/reset-password?token=${encodeURIComponent(rawToken)}`;
+    try {
+      await sendPasswordResetEmail({
+        to: user.email,
+        name: user.name,
+        resetLink,
+        expiresMinutes: RESET_TOKEN_EXPIRES_MINUTES,
+      });
+    } catch (mailErr) {
+      console.error('[forgot-password] Failed to send reset email:', mailErr?.message || mailErr);
+    }
+
+    return res.json({ message: FORGOT_GENERIC_MESSAGE });
+  } catch (error) {
+    return send500(res, 'Forgot password failed', error);
+  }
+});
+
+// Reset token validation (public)
+router.get('/reset-password/validate', async (req, res) => {
+  try {
+    const token = String(req.query?.token || '').trim();
+    if (!token) {
+      return res.json({ valid: false, message: 'Reset link is invalid or expired.' });
+    }
+
+    const tokenHash = hashResetToken(token);
+    const rows = await query(
+      `SELECT prt.id
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token_hash = ?
+         AND prt.used_at IS NULL
+         AND prt.invalidated_at IS NULL
+         AND prt.expires_at > NOW()
+         AND (u.is_active = 1 OR u.is_active = true)
+       LIMIT 1`,
+      [tokenHash]
+    );
+
+    return res.json({
+      valid: Array.isArray(rows) && rows.length > 0,
+      message: Array.isArray(rows) && rows.length > 0 ? 'Token is valid.' : 'Reset link is invalid or expired.',
+    });
+  } catch (error) {
+    return send500(res, 'Failed to validate reset link', error);
+  }
+});
+
+// Reset password with token (public)
+router.post('/reset-password', async (req, res) => {
+  const token = String(req.body?.token || '').trim();
+  const newPassword = String(req.body?.newPassword || '');
+  const confirmPassword = String(req.body?.confirmPassword || '');
+
+  if (!token || !newPassword || !confirmPassword) {
+    return res.status(400).json({ error: 'Token and passwords are required' });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  }
+  if (newPassword !== confirmPassword) {
+    return res.status(400).json({ error: 'Passwords do not match.' });
+  }
+
+  const tokenHash = hashResetToken(token);
+  const pool = await getConnection();
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    const [tokenRows] = await conn.execute(
+      `SELECT prt.id, prt.user_id, u.email
+       FROM password_reset_tokens prt
+       JOIN users u ON u.id = prt.user_id
+       WHERE prt.token_hash = ?
+         AND prt.used_at IS NULL
+         AND prt.invalidated_at IS NULL
+         AND prt.expires_at > NOW()
+         AND (u.is_active = 1 OR u.is_active = true)
+       LIMIT 1
+       FOR UPDATE`,
+      [tokenHash]
+    );
+
+    const tokenRow = Array.isArray(tokenRows) ? tokenRows[0] : null;
+    if (!tokenRow) {
+      await conn.rollback();
+      return res.status(400).json({ error: 'Reset link is invalid or expired.' });
+    }
+
+    const passwordHash = bcrypt.hashSync(newPassword, 10);
+    await conn.execute(
+      `UPDATE users
+       SET password = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [passwordHash, tokenRow.user_id]
+    );
+
+    await conn.execute(
+      `UPDATE password_reset_tokens
+       SET used_at = NOW(), updated_at = NOW()
+       WHERE id = ?`,
+      [tokenRow.id]
+    );
+
+    await conn.execute(
+      `UPDATE password_reset_tokens
+       SET invalidated_at = NOW(), updated_at = NOW()
+       WHERE user_id = ?
+         AND id <> ?
+         AND used_at IS NULL
+         AND invalidated_at IS NULL`,
+      [tokenRow.user_id, tokenRow.id]
+    );
+
+    await conn.execute(
+      `INSERT INTO audit_logs (id, entity_type, entity_id, action, new_value, user_id, ip_address)
+       VALUES (?, 'users', ?, 'password_reset', ?, ?, ?)`,
+      [
+        uuidv4(),
+        tokenRow.user_id,
+        JSON.stringify({ source: 'forgot_password' }),
+        tokenRow.user_id,
+        getClientIp(req),
+      ]
+    );
+
+    await conn.commit();
+    return res.json({ message: 'Password has been reset successfully.' });
+  } catch (error) {
+    await conn.rollback();
+    return send500(res, 'Failed to reset password', error);
+  } finally {
+    conn.release();
   }
 });
 

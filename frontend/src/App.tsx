@@ -3,6 +3,8 @@ import { useAuthStore } from './stores/authStore';
 import { MainLayout } from './components/layout';
 import {
   Login,
+  ForgotPassword,
+  ResetPassword,
   Dashboard,
   CEODashboard,
   ServiceTickets,
@@ -15,6 +17,7 @@ import {
   Settings,
   // Employees, // Hidden HR functionality
   Suppliers,
+  Reports,
 } from './pages';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -36,6 +39,14 @@ function App() {
       <Route
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route
+        path="/forgot-password"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <ForgotPassword />}
+      />
+      <Route
+        path="/reset-password"
+        element={isAuthenticated ? <Navigate to="/" replace /> : <ResetPassword />}
       />
 
       {/* Protected Routes */}
@@ -59,6 +70,7 @@ function App() {
         {/* <Route path="employees" element={<Employees />} /> */}
         <Route path="accounts" element={<Accounts />} />
         <Route path="suppliers" element={<Suppliers />} />
+        <Route path="reports" element={<Reports />} />
         <Route path="users" element={<Users />} />
         <Route path="settings" element={<Settings />} />
       </Route>

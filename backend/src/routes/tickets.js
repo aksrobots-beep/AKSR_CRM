@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { findAll, findById, findOne, insert, update, remove } from '../db/index.js';
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
+import { createNotification } from './notifications.js';
 
 const router = Router();
 
@@ -89,8 +90,9 @@ router.get('/meta/technicians', async (req, res) => {
 // Create ticket
 router.post('/', async (req, res) => {
   try {
-    const { title, description, priority, client_id, equipment_id, assigned_to, due_date, next_action_date, next_action_item, action_taken, estimated_hours, tags } = req.body;
+    const { title, description, priority, client_id, equipment_id, assigned_to, due_date, next_action_date, next_action_item, action_taken, estimated_hours, tags, is_billable: isBillableRaw } = req.body;
     if (!title || !client_id) return res.status(400).json({ error: 'Title and client are required' });
+    const is_billable = (isBillableRaw === false || isBillableRaw === 'false' || isBillableRaw === 0) ? 0 : 1;
     const dueResult = validateDate(due_date, { required: false, fieldName: 'Due date' });
     if (!dueResult.valid) return res.status(400).json({ error: dueResult.error });
     const nextResult = validateDate(next_action_date, { required: false, fieldName: 'Next action date' });
@@ -119,6 +121,7 @@ router.post('/', async (req, res) => {
       resolved_at: null,
       closed_at: null,
       is_active: 1,
+      is_billable,
       created_at: now,
       updated_at: now,
       created_by: req.user.id,
@@ -126,6 +129,14 @@ router.post('/', async (req, res) => {
     };
     await insert('tickets', ticket);
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
+    if (ticket.assigned_to) {
+      await createNotification(ticket.assigned_to, {
+        title: 'New ticket assigned to you',
+        message: `${ticket.title} (${ticket.ticket_number})`,
+        type: 'info',
+        link: '/service',
+      });
+    }
     res.status(201).json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
     console.error('Create ticket error:', error);
@@ -155,11 +166,22 @@ router.put('/:id', async (req, res) => {
     if (updates.status === 'resolved' && currentTicket.status !== 'resolved') updates.resolved_at = now;
     if (updates.status === 'closed' && currentTicket.status !== 'closed') updates.closed_at = now;
     if (updates.tags && Array.isArray(updates.tags)) updates.tags = JSON.stringify(updates.tags);
+    if (updates.is_billable !== undefined) {
+      updates.is_billable = (updates.is_billable === false || updates.is_billable === 'false' || updates.is_billable === 0) ? 0 : 1;
+    }
     if (updates.labor_cost !== undefined || updates.parts_cost !== undefined) {
       updates.total_cost = (updates.labor_cost ?? currentTicket.labor_cost ?? 0) + (updates.parts_cost ?? currentTicket.parts_cost ?? 0);
     }
     const ticket = await update('tickets', req.params.id, updates);
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
+    if (updates.assigned_to && updates.assigned_to !== currentTicket.assigned_to) {
+      await createNotification(updates.assigned_to, {
+        title: 'Ticket assigned to you',
+        message: `${ticket.title} (${ticket.ticket_number})`,
+        type: 'info',
+        link: '/service',
+      });
+    }
     res.json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
     console.error('Update ticket error:', error);
@@ -204,6 +226,14 @@ router.patch('/:id/assign', async (req, res) => {
     }
     const ticket = await update('tickets', req.params.id, updates);
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
+    if (assigned_to) {
+      await createNotification(assigned_to, {
+        title: 'Ticket assigned to you',
+        message: `${ticket.title} (${ticket.ticket_number})`,
+        type: 'info',
+        link: '/service',
+      });
+    }
     res.json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
     send500(res, 'Failed to assign ticket', error);

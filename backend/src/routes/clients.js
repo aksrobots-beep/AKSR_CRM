@@ -1,9 +1,57 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { findAll, findById, insert, update, remove } from '../db/index.js';
+import { findAll, findById, insert, update, remove, query } from '../db/index.js';
 import { send500 } from '../utils/errorResponse.js';
 
 const router = Router();
+
+/** Check for duplicate client_code, email, or phone. Returns { error: string } or null. */
+async function checkClientUniqueness({ client_code, email, phone, excludeId = null }) {
+  const exclude = excludeId != null ? excludeId : '';
+  const idCondition = exclude ? ' AND id <> ?' : '';
+  const params = (extra) => (exclude ? [...extra, exclude] : extra);
+
+  if (client_code != null && String(client_code).trim() !== '') {
+    const code = String(client_code).trim();
+    const rows = await query(
+      `SELECT id FROM clients WHERE TRIM(COALESCE(client_code, '')) = ?${idCondition} LIMIT 1`,
+      params([code])
+    );
+    if (Array.isArray(rows) && rows.length > 0) {
+      return { error: 'Client code already in use by another client.' };
+    }
+  }
+
+  if (email != null && String(email).trim() !== '') {
+    const em = String(email).trim().toLowerCase();
+    const rows = await query(
+      `SELECT id FROM clients WHERE LOWER(TRIM(COALESCE(email, ''))) = ? AND TRIM(COALESCE(email, '')) <> ''${idCondition} LIMIT 1`,
+      params([em])
+    );
+    if (Array.isArray(rows) && rows.length > 0) {
+      return { error: 'Email already in use by another client.' };
+    }
+  }
+
+  if (phone != null && String(phone).trim() !== '') {
+    const ph = String(phone).trim();
+    const rows = await query(
+      `SELECT id FROM clients WHERE TRIM(COALESCE(phone, '')) = ? AND TRIM(COALESCE(phone, '')) <> ''${idCondition} LIMIT 1`,
+      params([ph])
+    );
+    if (Array.isArray(rows) && rows.length > 0) {
+      return { error: 'Phone number already in use by another client.' };
+    }
+  }
+
+  return null;
+}
+
+function calcMonthlyRevenue(equipmentList) {
+  return equipmentList
+    .filter(e => e.ownership_type === 'rental' && e.rental_amount > 0)
+    .reduce((sum, e) => sum + Number(e.rental_amount), 0);
+}
 
 // Get all clients
 router.get('/', async (req, res) => {
@@ -14,7 +62,8 @@ router.get('/', async (req, res) => {
       return {
         ...client,
         equipment_count: eq.length,
-        robot_count: eq.filter(e => e.ownership_type === 'rental').length, // Rental equipment count
+        robot_count: eq.filter(e => e.ownership_type === 'rental').length,
+        total_revenue: calcMonthlyRevenue(eq),
       };
     });
     res.json(clients.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
@@ -37,7 +86,8 @@ router.get('/:id', async (req, res) => {
     res.json({
       ...client,
       equipment_count: equipment.length,
-      robot_count: equipment.filter(e => e.ownership_type === 'rental').length, // Rental equipment count
+      robot_count: equipment.filter(e => e.ownership_type === 'rental').length,
+      total_revenue: calcMonthlyRevenue(equipment),
       equipment,
       tickets,
     });
@@ -56,13 +106,19 @@ function toMySQLDatetime(d) {
 router.post('/', async (req, res) => {
   try {
     if (!req.user?.id) return res.status(401).json({ error: 'Authentication required' });
-    const { name, company_name, email, phone, address, city, state, country, postal_code, industry, assigned_to, notes } = req.body;
+    const { name, company_name, old_company_name, client_code, email, phone, address, city, state, country, postal_code, industry, assigned_to, notes } = req.body;
     if (!name || !company_name) return res.status(400).json({ error: 'Name and company name are required' });
+
+    const uniqueness = await checkClientUniqueness({ client_code, email, phone });
+    if (uniqueness) return res.status(400).json({ error: uniqueness.error });
+
     const now = toMySQLDatetime(new Date());
     const client = {
       id: uuidv4(),
+      client_code: client_code != null ? String(client_code).trim() : null,
       name: String(name).trim(),
       company_name: String(company_name).trim(),
+      old_company_name: old_company_name != null && String(old_company_name).trim() !== '' ? String(old_company_name).trim() : null,
       email: email != null ? String(email).trim() : '',
       phone: phone != null ? String(phone).trim() : '',
       address: address != null ? String(address).trim() : '',
@@ -91,8 +147,20 @@ router.post('/', async (req, res) => {
 // Update client
 router.put('/:id', async (req, res) => {
   try {
+    const { client_code, email, phone } = req.body;
+    const uniqueness = await checkClientUniqueness({
+      client_code: client_code !== undefined ? client_code : null,
+      email: email !== undefined ? email : null,
+      phone: phone !== undefined ? phone : null,
+      excludeId: req.params.id,
+    });
+    if (uniqueness) return res.status(400).json({ error: uniqueness.error });
+
     const now = new Date().toISOString();
     const updates = { ...req.body, updated_at: now, updated_by: req.user.id };
+    if (updates.old_company_name !== undefined) {
+      updates.old_company_name = updates.old_company_name != null && String(updates.old_company_name).trim() !== '' ? String(updates.old_company_name).trim() : null;
+    }
     const client = await update('clients', req.params.id, updates);
     if (!client) return res.status(404).json({ error: 'Client not found' });
     res.json(client);

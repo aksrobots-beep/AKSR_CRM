@@ -44,6 +44,16 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     amc_amount: 0,
     amc_terms: '',
     amc_renewal_status: 'active',
+    sim_cards: [
+      {
+        sim_number: '',
+        sim_carrier: '',
+        sim_phone_number: '',
+        sim_top_up_date: '',
+        sim_expired_date: '',
+        sim_reminder_at: '',
+      },
+    ],
   });
   const [ticketData, setTicketData] = useState({
     title: '',
@@ -51,6 +61,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     priority: 'medium',
     client_id: '',
     equipment_id: '',
+    is_billable: true,
   });
 
   useEffect(() => {
@@ -83,7 +94,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     // Validate ownership type specific fields
     if (formData.ownership_type === 'rental') {
       if (!formData.rental_start_date || !formData.rental_end_date) {
-        alert('Rental start and end dates are required for rental equipment');
+        alert('Rental start and end dates are required for rental contract');
         return;
       }
       const rentalStart = validateDate(formData.rental_start_date, { required: true, fieldName: 'Rental start date' });
@@ -127,10 +138,41 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     try {
       // Filter out empty model numbers
       const filteredModelNumbers = formData.model_numbers.filter(m => m && m.trim());
-      
+
+      // Build SIM cards payload (only non-empty rows)
+      const sim_cards = (formData as any).sim_cards
+        ?.filter((sc: any) =>
+          sc &&
+          (sc.sim_number ||
+            sc.sim_carrier ||
+            sc.sim_phone_number ||
+            sc.sim_top_up_date ||
+            sc.sim_expired_date ||
+            sc.sim_reminder_at)
+        )
+        .map((sc: any) => ({
+          sim_number: sc.sim_number?.trim() || null,
+          sim_carrier: sc.sim_carrier?.trim() || null,
+          sim_phone_number: sc.sim_phone_number?.trim() || null,
+          sim_top_up_date: sc.sim_top_up_date || null,
+          sim_expired_date: sc.sim_expired_date || null,
+          sim_reminder_at: sc.sim_reminder_at || null,
+        })) || [];
+
+      const {
+        sim_number,
+        sim_carrier,
+        sim_phone_number,
+        sim_top_up_date,
+        sim_expired_date,
+        sim_reminder_at,
+        ...rest
+      } = formData as any;
+
       await addEquipment({
-        ...formData,
+        ...rest,
         model_numbers: filteredModelNumbers,
+        sim_cards,
       } as any);
       setShowAddModal(false);
       setFormData({ 
@@ -155,6 +197,16 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
         amc_amount: 0,
         amc_terms: '',
         amc_renewal_status: 'active',
+        sim_cards: [
+          {
+            sim_number: '',
+            sim_carrier: '',
+            sim_phone_number: '',
+            sim_top_up_date: '',
+            sim_expired_date: '',
+            sim_reminder_at: '',
+          },
+        ],
       });
     } catch (error) {
       console.error('Failed to add equipment:', error);
@@ -168,7 +220,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     // Validate ownership type specific fields
     if (formData.ownership_type === 'rental') {
       if (!formData.rental_start_date || !formData.rental_end_date) {
-        alert('Rental start and end dates are required for rental equipment');
+        alert('Rental start and end dates are required for rental contract');
         return;
       }
       const rentalStart = validateDate(formData.rental_start_date, { required: true, fieldName: 'Rental start date' });
@@ -210,10 +262,41 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     try {
       // Filter out empty model numbers
       const filteredModelNumbers = formData.model_numbers.filter(m => m && m.trim());
-      
+
+      const sim_cards = (formData as any).sim_cards
+        ?.filter((sc: any) =>
+          sc &&
+          (sc.sim_number ||
+            sc.sim_carrier ||
+            sc.sim_phone_number ||
+            sc.sim_top_up_date ||
+            sc.sim_expired_date ||
+            sc.sim_reminder_at)
+        )
+        .map((sc: any, index: number) => ({
+          sim_number: sc.sim_number?.trim() || null,
+          sim_carrier: sc.sim_carrier?.trim() || null,
+          sim_phone_number: sc.sim_phone_number?.trim() || null,
+          sim_top_up_date: sc.sim_top_up_date || null,
+          sim_expired_date: sc.sim_expired_date || null,
+          sim_reminder_at: sc.sim_reminder_at || null,
+          sort_order: index,
+        })) || [];
+
+      const {
+        sim_number,
+        sim_carrier,
+        sim_phone_number,
+        sim_top_up_date,
+        sim_expired_date,
+        sim_reminder_at,
+        ...rest
+      } = formData as any;
+
       const updateData: any = { 
-        ...formData,
+        ...rest,
         model_numbers: filteredModelNumbers,
+        sim_cards,
       };
       
       await updateEquipmentItem(selectedEquipment.id, updateData);
@@ -241,6 +324,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
         amc_amount: 0,
         amc_terms: '',
         amc_renewal_status: 'active',
+        sim_cards: [{ sim_number: '', sim_carrier: '', sim_phone_number: '', sim_top_up_date: '', sim_expired_date: '', sim_reminder_at: '' }],
       });
     } catch (error) {
       console.error('Failed to update equipment:', error);
@@ -252,7 +336,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
     try {
       await addTicket(ticketData as any);
       setShowTicketModal(false);
-      setTicketData({ title: '', description: '', priority: 'medium', client_id: '', equipment_id: '' });
+      setTicketData({ title: '', description: '', priority: 'medium', client_id: '', equipment_id: '', is_billable: true });
       setSelectedEquipment(null);
     } catch (error) {
       console.error('Failed to create ticket:', error);
@@ -280,6 +364,39 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
       lastServiceDate = new Date(selectedEquipment.lastServiceDate).toISOString().split('T')[0];
     }
     
+    const simCardsFromEquipment =
+      (selectedEquipment as any).simCards && Array.isArray((selectedEquipment as any).simCards)
+        ? (selectedEquipment as any).simCards.map((sc: any) => ({
+            sim_number: sc.simNumber || sc.sim_number || '',
+            sim_carrier: sc.simCarrier || sc.sim_carrier || '',
+            sim_phone_number: sc.simPhoneNumber || sc.sim_phone_number || '',
+            sim_top_up_date: sc.simTopUpDate
+              ? new Date(sc.simTopUpDate).toISOString().split('T')[0]
+              : sc.sim_top_up_date || '',
+            sim_expired_date: sc.simExpiredDate
+              ? new Date(sc.simExpiredDate).toISOString().split('T')[0]
+              : sc.sim_expired_date || '',
+            sim_reminder_at: sc.simReminderAt
+              ? new Date(sc.simReminderAt).toISOString().slice(0, 16)
+              : sc.sim_reminder_at || '',
+          }))
+        : [
+            {
+              sim_number: selectedEquipment.simNumber || '',
+              sim_carrier: selectedEquipment.simCarrier || '',
+              sim_phone_number: selectedEquipment.simPhoneNumber || '',
+              sim_top_up_date: selectedEquipment.simTopUpDate
+                ? new Date(selectedEquipment.simTopUpDate).toISOString().split('T')[0]
+                : '',
+              sim_expired_date: selectedEquipment.simExpiredDate
+                ? new Date(selectedEquipment.simExpiredDate).toISOString().split('T')[0]
+                : '',
+              sim_reminder_at: selectedEquipment.simReminderAt
+                ? new Date(selectedEquipment.simReminderAt).toISOString().slice(0, 16)
+                : '',
+            },
+          ];
+
     setFormData({
       name: selectedEquipment.name,
       ownership_type: selectedEquipment.ownershipType || 'sold',
@@ -304,6 +421,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
       amc_amount: selectedEquipment.amcAmount || 0,
       amc_terms: selectedEquipment.amcTerms || '',
       amc_renewal_status: selectedEquipment.amcRenewalStatus || 'active',
+      sim_cards: simCardsFromEquipment,
     });
     setShowEditModal(true);
   };
@@ -316,6 +434,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
       priority: selectedEquipment.status === 'maintenance_required' ? 'high' : 'medium',
       client_id: selectedEquipment.clientId,
       equipment_id: selectedEquipment.id,
+      is_billable: true,
     });
     setShowTicketModal(true);
   };
@@ -398,7 +517,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
   const tableColumns: Column<Equipment>[] = [
     { 
       key: 'name', 
-      header: 'Equipment', 
+      header: 'Contract', 
       sortable: true, 
       searchable: true, 
       render: (eq) => (
@@ -576,12 +695,12 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
   return (
     <div className="min-h-screen">
       <Header 
-        title={robotsOnly ? 'Robots' : 'Equipment'} 
+        title={robotsOnly ? 'Robots' : 'Contract'} 
         subtitle={robotsOnly 
           ? `${filteredEquipment.length} total robots • ${activeRobotsCount} active` 
-          : `${filteredEquipment.length} total units`} 
+          : `${filteredEquipment.length} total contracts`} 
         showAddButton 
-        addButtonText={robotsOnly ? 'Add Robot' : 'Add Equipment'} 
+        addButtonText={robotsOnly ? 'Add Robot' : 'Add Contract'} 
         onAddClick={() => setShowAddModal(true)} 
       />
       <div className="p-6">
@@ -595,12 +714,12 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
         <DataTable columns={tableColumns} data={equipmentWithServiceDates} onRowClick={(eq) => setSelectedEquipment(eq)} />
       </div>
 
-      {/* Add Equipment Modal */}
+      {/* Add Contract Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="card w-full max-w-3xl animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-neutral-200 flex items-center justify-between sticky top-0 bg-white z-10">
-              <h2 className="text-xl font-semibold">Add {robotsOnly ? 'Robot' : 'Equipment'}</h2>
+              <h2 className="text-xl font-semibold">Add {robotsOnly ? 'Robot' : 'Contract'}</h2>
               <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-neutral-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleAddEquipment} className="p-6 space-y-6">
@@ -610,7 +729,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Name <span className="text-danger-500">*</span></label>
-                    <input type="text" className="input" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Equipment name" />
+                    <input type="text" className="input" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="Contract name" />
                   </div>
                   <div>
                     <label className="label">Ownership Type <span className="text-danger-500">*</span></label>
@@ -806,6 +925,146 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                 </div>
               )}
 
+              {/* SIM Card (Optional - for robots) */}
+              <div className="space-y-4 bg-neutral-50 p-4 rounded-lg border border-neutral-200">
+                <h3 className="font-semibold text-neutral-900 border-b pb-2">SIM Card Details (Optional)</h3>
+                <div className="space-y-4">
+                  {formData.sim_cards?.map((sim, index) => (
+                    <div key={index} className="grid grid-cols-2 gap-4 border border-dashed border-neutral-200 rounded-lg p-3">
+                      <div>
+                        <label className="label">SIM Number</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={sim.sim_number}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_number: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="e.g. 0123456789"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Carrier</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={sim.sim_carrier}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_carrier: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="e.g. Maxis, Celcom"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Phone Number</label>
+                        <input
+                          type="tel"
+                          className="input"
+                          value={sim.sim_phone_number}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_phone_number: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="+60 12-345 6789"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Top-up Date</label>
+                        <input
+                          type="date"
+                          className="input"
+                          min={DATE_INPUT_MIN}
+                          max={DATE_INPUT_MAX}
+                          value={sim.sim_top_up_date}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_top_up_date: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Expired Date</label>
+                        <input
+                          type="date"
+                          className="input"
+                          min={DATE_INPUT_MIN}
+                          max={DATE_INPUT_MAX}
+                          value={sim.sim_expired_date}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_expired_date: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Reminder (date & time)</label>
+                        <input
+                          type="datetime-local"
+                          className="input"
+                          value={sim.sim_reminder_at}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_reminder_at: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          title="Set when to receive a notification for SIM top-up or expiry"
+                        />
+                      </div>
+                      {formData.sim_cards.length > 1 && (
+                        <div className="col-span-2 flex justify-end">
+                          <button
+                            type="button"
+                            className="text-sm text-danger-600 hover:text-danger-700"
+                            onClick={() => {
+                              const next = formData.sim_cards.filter((_, i) => i !== index);
+                              setFormData({ ...formData, sim_cards: next.length ? next : [{
+                                sim_number: '',
+                                sim_carrier: '',
+                                sim_phone_number: '',
+                                sim_top_up_date: '',
+                                sim_expired_date: '',
+                                sim_reminder_at: '',
+                              }] });
+                            }}
+                          >
+                            Remove SIM
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        sim_cards: [
+                          ...formData.sim_cards,
+                          {
+                            sim_number: '',
+                            sim_carrier: '',
+                            sim_phone_number: '',
+                            sim_top_up_date: '',
+                            sim_expired_date: '',
+                            sim_reminder_at: '',
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    + Add SIM card
+                  </button>
+                </div>
+              </div>
+
               {/* Other Details Section */}
               <div className="space-y-4">
                 <h3 className="font-semibold text-neutral-900 border-b pb-2">Other Details</h3>
@@ -873,19 +1132,19 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
 
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary flex-1">Cancel</button>
-                <button type="submit" className="btn-primary flex-1">Add {robotsOnly ? 'Robot' : 'Equipment'}</button>
+                <button type="submit" className="btn-primary flex-1">Add {robotsOnly ? 'Robot' : 'Contract'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Edit Equipment Modal */}
+      {/* Edit Contract Modal */}
       {showEditModal && selectedEquipment && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="card w-full max-w-3xl animate-scale-in max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-neutral-200 flex items-center justify-between sticky top-0 bg-white z-10">
-              <h2 className="text-xl font-semibold">Edit {robotsOnly ? 'Robot' : 'Equipment'}</h2>
+              <h2 className="text-xl font-semibold">Edit {robotsOnly ? 'Robot' : 'Contract'}</h2>
               <button onClick={() => setShowEditModal(false)} className="p-2 hover:bg-neutral-100 rounded-lg"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleEditEquipment} className="p-6 space-y-6">
@@ -1091,6 +1350,146 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                 </div>
               )}
 
+              {/* SIM Card (Optional - for robots) */}
+              <div className="space-y-4 bg-neutral-50 p-4 rounded-lg border border-neutral-200">
+                <h3 className="font-semibold text-neutral-900 border-b pb-2">SIM Card Details (Optional)</h3>
+                <div className="space-y-4">
+                  {formData.sim_cards?.map((sim, index) => (
+                    <div key={index} className="grid grid-cols-2 gap-4 border border-dashed border-neutral-200 rounded-lg p-3">
+                      <div>
+                        <label className="label">SIM Number</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={sim.sim_number}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_number: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="e.g. 0123456789"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Carrier</label>
+                        <input
+                          type="text"
+                          className="input"
+                          value={sim.sim_carrier}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_carrier: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="e.g. Maxis, Celcom"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Phone Number</label>
+                        <input
+                          type="tel"
+                          className="input"
+                          value={sim.sim_phone_number}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_phone_number: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          placeholder="+60 12-345 6789"
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Top-up Date</label>
+                        <input
+                          type="date"
+                          className="input"
+                          min={DATE_INPUT_MIN}
+                          max={DATE_INPUT_MAX}
+                          value={sim.sim_top_up_date}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_top_up_date: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">SIM Expired Date</label>
+                        <input
+                          type="date"
+                          className="input"
+                          min={DATE_INPUT_MIN}
+                          max={DATE_INPUT_MAX}
+                          value={sim.sim_expired_date}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_expired_date: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label className="label">Reminder (date & time)</label>
+                        <input
+                          type="datetime-local"
+                          className="input"
+                          value={sim.sim_reminder_at}
+                          onChange={(e) => {
+                            const next = [...formData.sim_cards];
+                            next[index] = { ...next[index], sim_reminder_at: e.target.value };
+                            setFormData({ ...formData, sim_cards: next });
+                          }}
+                          title="Set when to receive a notification for SIM top-up or expiry"
+                        />
+                      </div>
+                      {formData.sim_cards.length > 1 && (
+                        <div className="col-span-2 flex justify-end">
+                          <button
+                            type="button"
+                            className="text-sm text-danger-600 hover:text-danger-700"
+                            onClick={() => {
+                              const next = formData.sim_cards.filter((_, i) => i !== index);
+                              setFormData({ ...formData, sim_cards: next.length ? next : [{
+                                sim_number: '',
+                                sim_carrier: '',
+                                sim_phone_number: '',
+                                sim_top_up_date: '',
+                                sim_expired_date: '',
+                                sim_reminder_at: '',
+                              }] });
+                            }}
+                          >
+                            Remove SIM
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="text-sm text-primary-600 hover:text-primary-700 font-medium"
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        sim_cards: [
+                          ...formData.sim_cards,
+                          {
+                            sim_number: '',
+                            sim_carrier: '',
+                            sim_phone_number: '',
+                            sim_top_up_date: '',
+                            sim_expired_date: '',
+                            sim_reminder_at: '',
+                          },
+                        ],
+                      })
+                    }
+                  >
+                    + Add SIM card
+                  </button>
+                </div>
+              </div>
+
               {/* Other Details Section */}
               <div className="space-y-4">
                 <h3 className="font-semibold text-neutral-900 border-b pb-2">Other Details</h3>
@@ -1220,6 +1619,31 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                   <option value="critical">Critical</option>
                 </select>
               </div>
+              <div>
+                <label className="label">Billing</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable-equipment"
+                      checked={ticketData.is_billable === true}
+                      onChange={() => setTicketData({ ...ticketData, is_billable: true })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Billable</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable-equipment"
+                      checked={ticketData.is_billable === false}
+                      onChange={() => setTicketData({ ...ticketData, is_billable: false })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Non-billable</span>
+                  </label>
+                </div>
+              </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowTicketModal(false)} className="btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn-primary flex-1">
@@ -1232,7 +1656,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
         </div>
       )}
 
-      {/* Equipment Detail Modal */}
+      {/* Contract Detail Modal */}
       {selectedEquipment && !showEditModal && !showTicketModal && (() => {
         // Calculate last service date from resolved tickets for this equipment
         const equipmentTickets = tickets.filter(t => t.equipmentId === selectedEquipment.id && t.status === 'resolved');
@@ -1278,7 +1702,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
               </div>
               <div className="p-6 space-y-6">
                 {selectedEquipment.status === 'maintenance_required' && (
-                  <div className="flex items-center gap-3 p-4 bg-warning-50 border border-warning-200 rounded-lg"><AlertTriangle className="w-5 h-5 text-warning-600" /><div><p className="font-medium text-warning-800">Maintenance Required</p><p className="text-sm text-warning-700">This equipment needs servicing.</p></div></div>
+                  <div className="flex items-center gap-3 p-4 bg-warning-50 border border-warning-200 rounded-lg"><AlertTriangle className="w-5 h-5 text-warning-600" /><div><p className="font-medium text-warning-800">Maintenance Required</p><p className="text-sm text-warning-700">This contract needs servicing.</p></div></div>
                 )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg"><div className="w-10 h-10 rounded-lg bg-neutral-200 flex items-center justify-center"><span className="text-sm font-mono">#</span></div><div><p className="text-xs text-neutral-500">Serial Number</p><p className="font-mono font-medium">{selectedEquipment.serialNumber}</p></div></div>
@@ -1286,6 +1710,19 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg"><Calendar className="w-5 h-5 text-neutral-400" /><div><p className="text-xs text-neutral-500">Installation Date</p><p className="font-medium">{selectedEquipment.installationDate ? format(new Date(selectedEquipment.installationDate), 'MMMM d, yyyy') : '-'}</p></div></div>
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg"><Shield className="w-5 h-5 text-neutral-400" /><div><p className="text-xs text-neutral-500">Warranty Expires</p><p className="font-medium">{selectedEquipment.warrantyExpiry ? format(new Date(selectedEquipment.warrantyExpiry), 'MMMM d, yyyy') : 'No warranty'}</p></div></div>
                 </div>
+                {(selectedEquipment.simNumber || selectedEquipment.simCarrier || selectedEquipment.simPhoneNumber || selectedEquipment.simTopUpDate || selectedEquipment.simExpiredDate || selectedEquipment.simReminderAt) && (
+                  <div className="p-4 bg-neutral-50 rounded-lg border border-neutral-200">
+                    <h4 className="font-medium text-neutral-900 mb-3">SIM Card</h4>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      {selectedEquipment.simNumber && <div><p className="text-neutral-500">SIM Number</p><p className="font-medium">{selectedEquipment.simNumber}</p></div>}
+                      {selectedEquipment.simCarrier && <div><p className="text-neutral-500">Carrier</p><p className="font-medium">{selectedEquipment.simCarrier}</p></div>}
+                      {selectedEquipment.simPhoneNumber && <div><p className="text-neutral-500">Phone Number</p><p className="font-medium">{selectedEquipment.simPhoneNumber}</p></div>}
+                      {selectedEquipment.simTopUpDate && <div><p className="text-neutral-500">Top-up Date</p><p className="font-medium">{format(new Date(selectedEquipment.simTopUpDate), 'MMM d, yyyy')}</p></div>}
+                      {selectedEquipment.simExpiredDate && <div><p className="text-neutral-500">Expired Date</p><p className="font-medium">{format(new Date(selectedEquipment.simExpiredDate), 'MMM d, yyyy')}</p></div>}
+                      {selectedEquipment.simReminderAt && <div><p className="text-neutral-500">Reminder</p><p className="font-medium">{format(new Date(selectedEquipment.simReminderAt), 'MMM d, yyyy • h:mm a')}</p></div>}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <h4 className="font-medium text-neutral-900 mb-3">Service Schedule</h4>
                   <div className="grid grid-cols-2 gap-4">
@@ -1309,7 +1746,7 @@ export function EquipmentPage({ robotsOnly = false }: EquipmentPageProps) {
                   <Ticket className="w-4 h-4 mr-2" />
                   Create Service Ticket
                 </button>
-                <button onClick={openEditModal} className="btn-secondary flex-1">Edit {robotsOnly ? 'Robot' : 'Equipment'}</button>
+                <button onClick={openEditModal} className="btn-secondary flex-1">Edit {robotsOnly ? 'Robot' : 'Contract'}</button>
                 <button onClick={handleDelete} className="btn-secondary text-danger-600 hover:bg-danger-50">
                   <Trash2 className="w-4 h-4" />
                 </button>

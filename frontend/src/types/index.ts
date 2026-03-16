@@ -36,8 +36,10 @@ export interface User extends BaseEntity {
 
 // Client / Customer
 export interface Client extends BaseEntity {
+  clientCode: string;
   name: string;
   companyName: string;
+  oldCompanyName?: string;
   email: string;
   phone: string;
   address: string;
@@ -96,6 +98,26 @@ export interface Equipment extends BaseEntity {
   nextServiceDate?: Date;
   notes?: string;
   isActive: boolean;
+
+  // SIM cards (optional, for robots) — multiple per contract
+  simCards?: SimCard[];
+  // Legacy single-SIM fields
+  simNumber?: string;
+  simCarrier?: string;
+  simPhoneNumber?: string;
+  simTopUpDate?: Date;
+  simExpiredDate?: Date;
+  simReminderAt?: Date;
+}
+
+export interface SimCard {
+  id?: string;
+  simNumber: string;
+  simCarrier?: string;
+  simPhoneNumber?: string;
+  simTopUpDate?: Date;
+  simExpiredDate?: Date;
+  simReminderAt?: Date;
 }
 
 // Supplier (Manufacturer Master)
@@ -147,6 +169,7 @@ export interface ServiceTicket extends BaseEntity {
   totalCost: number;
   tags: string[];
   isActive: boolean;
+  isBillable?: boolean;
 }
 
 // Inventory
@@ -157,6 +180,8 @@ export type InventoryCategory =
   | 'components'
   | 'accessories';
 
+export type InventoryCurrency = 'MYR' | 'USD' | 'SGD' | 'CNY';
+
 export interface InventoryItem extends BaseEntity {
   sku: string;
   name: string;
@@ -165,10 +190,22 @@ export interface InventoryItem extends BaseEntity {
   quantity: number;
   minQuantity: number;
   unitPrice: number;
+  currency: InventoryCurrency;
   supplier?: string;
   location: string;
-  compatibleEquipment: string[]; // Equipment model names
+  compatibleEquipment: string[];
+  trackSerialNumbers: boolean;
   isActive: boolean;
+}
+
+export interface InventorySerialNumber {
+  id: string;
+  inventoryId: string;
+  serialNumber: string;
+  status: 'available' | 'in_use' | 'defective' | 'retired';
+  notes: string;
+  createdAt: Date;
+  createdBy: string;
 }
 
 export interface InventoryUsage {

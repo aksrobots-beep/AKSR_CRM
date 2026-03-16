@@ -1,14 +1,63 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { findAll, findById, insert, update, remove } from '../db/index.js';
+import { findAll, findById, insert, update, remove, query } from '../db/index.js';
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
+import { createNotification } from './notifications.js';
 
 const router = Router();
+
+/** Check due SIM reminders from equipment_sim_cards and create notifications for ceo/admin/service_manager */
+async function checkSimReminders() {
+  try {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    const due = await query(
+      `SELECT esc.id AS sim_card_id, esc.equipment_id, esc.sim_reminder_at, e.name AS equipment_name
+       FROM equipment_sim_cards esc
+       JOIN equipment e ON e.id = esc.equipment_id
+       WHERE esc.sim_reminder_at IS NOT NULL AND esc.sim_reminder_at <= ? AND COALESCE(esc.sim_reminder_sent, 0) = 0`,
+      [now]
+    );
+    if (!due || due.length === 0) return;
+    const users = await findAll('users');
+    const notifyRoles = ['ceo', 'admin', 'service_manager'];
+    const toNotify = users.filter((u) => notifyRoles.includes(u.role) && (u.is_active === 1 || u.is_active === true));
+    for (const row of due) {
+      for (const u of toNotify) {
+        await createNotification(u.id, {
+          title: 'SIM reminder',
+          message: `${row.equipment_name}: SIM top-up or expiry reminder (scheduled for ${row.sim_reminder_at})`,
+          type: 'warning',
+          link: '/robots',
+        });
+      }
+      await update('equipment_sim_cards', row.sim_card_id, { sim_reminder_sent: 1 });
+    }
+  } catch (err) {
+    console.warn('checkSimReminders:', err?.message || err);
+  }
+}
+
+/** Normalize sim_cards from request body (array of { sim_number, sim_carrier, ... }) */
+function normalizeSimCards(sim_cards) {
+  if (!Array.isArray(sim_cards)) return [];
+  return sim_cards
+    .filter((s) => s && (s.sim_number || s.sim_carrier || s.sim_phone_number || s.sim_top_up_date || s.sim_expired_date || s.sim_reminder_at))
+    .map((s, i) => ({
+      sim_number: s.sim_number != null && String(s.sim_number).trim() !== '' ? String(s.sim_number).trim() : null,
+      sim_carrier: s.sim_carrier != null && String(s.sim_carrier).trim() !== '' ? String(s.sim_carrier).trim() : null,
+      sim_phone_number: s.sim_phone_number != null && String(s.sim_phone_number).trim() !== '' ? String(s.sim_phone_number).trim() : null,
+      sim_top_up_date: s.sim_top_up_date || null,
+      sim_expired_date: s.sim_expired_date || null,
+      sim_reminder_at: s.sim_reminder_at != null && String(s.sim_reminder_at).trim() !== '' ? String(s.sim_reminder_at).trim().slice(0, 19).replace('T', ' ') : null,
+      sort_order: i,
+    }));
+}
 
 // Get all equipment
 router.get('/', async (req, res) => {
   try {
+    await checkSimReminders();
     const { ownership_type, status, client_id, amc_status } = req.query;
     
     let equipment = await findAll('equipment');
@@ -29,7 +78,25 @@ router.get('/', async (req, res) => {
       });
     }
     
-    // Parse model_numbers JSON and add client name
+    const equipmentIds = equipment.map((e) => e.id);
+    let simCardsByEquipment = {};
+    if (equipmentIds.length > 0) {
+      try {
+        const placeholders = equipmentIds.map(() => '?').join(',');
+        const simCards = await query(
+          `SELECT * FROM equipment_sim_cards WHERE equipment_id IN (${placeholders}) ORDER BY equipment_id, sort_order, id`,
+          equipmentIds
+        );
+        for (const sc of simCards || []) {
+          if (!simCardsByEquipment[sc.equipment_id]) simCardsByEquipment[sc.equipment_id] = [];
+          simCardsByEquipment[sc.equipment_id].push(sc);
+        }
+      } catch (err) {
+        console.warn('equipment_sim_cards query skipped (table may not exist):', err?.message || err);
+      }
+    }
+    
+    // Parse model_numbers JSON and add client name and sim_cards
     const result = await Promise.all(equipment.map(async (eq) => {
       const client = await findById('clients', eq.client_id);
       let modelNumbers = [];
@@ -46,7 +113,8 @@ router.get('/', async (req, res) => {
       return { 
         ...eq, 
         model_numbers: modelNumbers,
-        client_name: client?.company_name 
+        client_name: client?.company_name,
+        sim_cards: simCardsByEquipment[eq.id] || [],
       };
     }));
     
@@ -63,8 +131,18 @@ router.get('/:id', async (req, res) => {
     const equipment = await findById('equipment', req.params.id);
     if (!equipment) return res.status(404).json({ error: 'Equipment not found' });
     
-    const [c, ticketsData] = await Promise.all([findById('clients', equipment.client_id), findAll('tickets')]);
-    const serviceHistory = ticketsData.filter(t => t.equipment_id === equipment.id).slice(0, 10);
+    let simCards = [];
+    const [c, ticketsData] = await Promise.all([
+      findById('clients', equipment.client_id),
+      findAll('tickets'),
+    ]);
+    try {
+      const rows = await query('SELECT * FROM equipment_sim_cards WHERE equipment_id = ? ORDER BY sort_order, id', [equipment.id]);
+      simCards = rows || [];
+    } catch (err) {
+      console.warn('equipment_sim_cards query skipped:', err?.message || err);
+    }
+    const serviceHistory = (ticketsData || []).filter(t => t.equipment_id === equipment.id).slice(0, 10);
     
     // Parse model_numbers JSON
     let modelNumbers = [];
@@ -82,7 +160,8 @@ router.get('/:id', async (req, res) => {
       ...equipment, 
       model_numbers: modelNumbers,
       client_name: c?.company_name, 
-      serviceHistory 
+      serviceHistory,
+      sim_cards: simCards || [],
     });
   } catch (error) {
     console.error('Get equipment error:', error);
@@ -97,8 +176,10 @@ router.post('/', async (req, res) => {
       name, ownership_type, model, model_numbers, serial_number, manufacturer, client_id, 
       installation_date, warranty_expiry, location, notes,
       rental_start_date, rental_end_date, rental_duration_months, rental_amount, rental_terms,
-      amc_contract_start, amc_contract_end, amc_amount, amc_terms, amc_renewal_status
+      amc_contract_start, amc_contract_end, amc_amount, amc_terms, amc_renewal_status,
+      sim_cards: sim_cards_raw,
     } = req.body;
+    const sim_cards = normalizeSimCards(sim_cards_raw);
     
     // Basic validation
     if (!name || !ownership_type || !client_id) {
@@ -153,6 +234,17 @@ router.post('/', async (req, res) => {
     const warrantyResult = validateDate(warranty_expiry, { required: false, fieldName: 'Warranty expiry' });
     if (!warrantyResult.valid) return res.status(400).json({ error: warrantyResult.error });
     
+    for (const sc of sim_cards) {
+      if (sc.sim_top_up_date) {
+        const r = validateDate(sc.sim_top_up_date, { required: false, fieldName: 'SIM top-up date' });
+        if (!r.valid) return res.status(400).json({ error: r.error });
+      }
+      if (sc.sim_expired_date) {
+        const r = validateDate(sc.sim_expired_date, { required: false, fieldName: 'SIM expired date' });
+        if (!r.valid) return res.status(400).json({ error: r.error });
+      }
+    }
+    
     // Process model_numbers
     let modelNumbersJson = null;
     if (model_numbers && Array.isArray(model_numbers) && model_numbers.length > 0) {
@@ -197,6 +289,25 @@ router.post('/', async (req, res) => {
     
     await insert('equipment', equipment);
     
+    try {
+      for (const sc of sim_cards) {
+        await insert('equipment_sim_cards', {
+          id: uuidv4(),
+          equipment_id: equipment.id,
+          sim_number: sc.sim_number,
+          sim_carrier: sc.sim_carrier,
+          sim_phone_number: sc.sim_phone_number,
+          sim_top_up_date: sc.sim_top_up_date || null,
+          sim_expired_date: sc.sim_expired_date || null,
+          sim_reminder_at: sc.sim_reminder_at || null,
+          sim_reminder_sent: 0,
+          sort_order: sc.sort_order,
+        });
+      }
+    } catch (err) {
+      console.warn('equipment_sim_cards insert skipped (table may not exist):', err?.message || err);
+    }
+    
     // Parse model_numbers for response
     let modelNumbers = [];
     try {
@@ -209,7 +320,11 @@ router.post('/', async (req, res) => {
       console.warn('Failed to parse model_numbers for new equipment');
     }
     
-    res.status(201).json({ ...equipment, model_numbers: modelNumbers });
+    let insertedSimCards = [];
+    try {
+      insertedSimCards = await query('SELECT * FROM equipment_sim_cards WHERE equipment_id = ? ORDER BY sort_order, id', [equipment.id]) || [];
+    } catch (_) {}
+    res.status(201).json({ ...equipment, model_numbers: modelNumbers, sim_cards: insertedSimCards });
   } catch (error) {
     console.error('Create equipment error:', error);
     send500(res, 'Failed to create equipment', error);
@@ -219,8 +334,11 @@ router.post('/', async (req, res) => {
 // Update equipment
 router.put('/:id', async (req, res) => {
   try {
+    const equipmentId = req.params.id;
+    const { sim_cards: sim_cards_raw, ...body } = req.body;
+    const sim_cards = normalizeSimCards(sim_cards_raw);
     const now = new Date().toISOString();
-    const updates = { ...req.body, updated_at: now, updated_by: req.user.id };
+    const updates = { ...body, updated_at: now, updated_by: req.user.id };
     
     // Validate ownership type if provided
     if (updates.ownership_type && !['rental', 'sold'].includes(updates.ownership_type)) {
@@ -232,10 +350,10 @@ router.put('/:id', async (req, res) => {
       updates.model_numbers = JSON.stringify(updates.model_numbers.filter(m => m && m.trim()));
     }
     
-    // Validate date fields
+    // Validate date fields (no sim_* on equipment anymore; sim_cards validated below)
     const dateFields = [
       'installation_date', 'warranty_expiry', 'last_service_date', 'next_service_date',
-      'rental_start_date', 'rental_end_date', 'amc_contract_start', 'amc_contract_end'
+      'rental_start_date', 'rental_end_date', 'amc_contract_start', 'amc_contract_end',
     ];
     const labels = { 
       installation_date: 'Installation date', 
@@ -245,7 +363,7 @@ router.put('/:id', async (req, res) => {
       rental_start_date: 'Rental start date',
       rental_end_date: 'Rental end date',
       amc_contract_start: 'AMC contract start',
-      amc_contract_end: 'AMC contract end'
+      amc_contract_end: 'AMC contract end',
     };
     
     for (const key of dateFields) {
@@ -253,6 +371,17 @@ router.put('/:id', async (req, res) => {
         const r = validateDate(updates[key], { required: false, fieldName: labels[key] });
         if (!r.valid) return res.status(400).json({ error: r.error });
         updates[key] = r.value ?? null;
+      }
+    }
+    
+    for (const sc of sim_cards) {
+      if (sc.sim_top_up_date) {
+        const r = validateDate(sc.sim_top_up_date, { required: false, fieldName: 'SIM top-up date' });
+        if (!r.valid) return res.status(400).json({ error: r.error });
+      }
+      if (sc.sim_expired_date) {
+        const r = validateDate(sc.sim_expired_date, { required: false, fieldName: 'SIM expired date' });
+        if (!r.valid) return res.status(400).json({ error: r.error });
       }
     }
     
@@ -270,12 +399,32 @@ router.put('/:id', async (req, res) => {
       }
     }
     
-    const equipment = await update('equipment', req.params.id, updates);
+    const equipment = await update('equipment', equipmentId, updates);
     if (!equipment) {
       return res.status(404).json({ error: 'Equipment not found' });
     }
     
-    // Parse model_numbers JSON for response
+    try {
+      await query('DELETE FROM equipment_sim_cards WHERE equipment_id = ?', [equipmentId]);
+      for (const sc of sim_cards) {
+        await insert('equipment_sim_cards', {
+          id: uuidv4(),
+          equipment_id: equipmentId,
+          sim_number: sc.sim_number,
+          sim_carrier: sc.sim_carrier,
+          sim_phone_number: sc.sim_phone_number,
+          sim_top_up_date: sc.sim_top_up_date || null,
+          sim_expired_date: sc.sim_expired_date || null,
+          sim_reminder_at: sc.sim_reminder_at || null,
+          sim_reminder_sent: 0,
+          sort_order: sc.sort_order,
+        });
+      }
+    } catch (err) {
+      console.warn('equipment_sim_cards update skipped (table may not exist):', err?.message || err);
+    }
+    
+    // Parse model_numbers JSON and load sim_cards for response
     let modelNumbers = [];
     try {
       if (equipment.model_numbers) {
@@ -286,8 +435,11 @@ router.put('/:id', async (req, res) => {
     } catch (e) {
       console.warn('Failed to parse model_numbers for equipment', equipment.id);
     }
-    
-    res.json({ ...equipment, model_numbers: modelNumbers });
+    let insertedSimCards = [];
+    try {
+      insertedSimCards = await query('SELECT * FROM equipment_sim_cards WHERE equipment_id = ? ORDER BY sort_order, id', [equipmentId]) || [];
+    } catch (_) {}
+    res.json({ ...equipment, model_numbers: modelNumbers, sim_cards: insertedSimCards });
   } catch (error) {
     console.error('Update equipment error:', error);
     send500(res, 'Failed to update equipment', error);

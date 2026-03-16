@@ -19,6 +19,12 @@
     "migrate-is-active": "node src/scripts/add-is-active-columns.js",
     "migrate-can-approve": "node src/scripts/add-can-approve-column.js",
     "migrate-equipment": "node src/scripts/migrate-equipment-ownership.js",
+    "migrate-equipment-sim": "node src/scripts/migrate-equipment-sim.js",
+    "migrate-equipment-sim-cards-table": "node src/scripts/migrate-equipment-sim-cards-table.js",
+    "migrate-ticket-billable": "node src/scripts/migrate-ticket-billable.js",
+    "migrate-report-module": "node src/scripts/migrate-report-module.js",
+    "migrate-password-reset": "node src/scripts/migrate-password-reset.js",
+    "migrate-old-company-name": "node src/scripts/migrate-old-company-name.js",
     "migrate-phone": "node src/scripts/add-phone-column.js",
     "test-api": "node src/scripts/test-and-seed-api.js",
     "seed-api": "node src/scripts/test-and-seed-api.js --seed"
@@ -31,6 +37,7 @@
     "jsonwebtoken": "^9.0.2",
     "lowdb": "^7.0.1",
     "mysql2": "^3.6.5",
+    "nodemailer": "^7.0.13",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5"
   },

@@ -3,9 +3,15 @@ import { Header } from '../components/layout';
 import { DataTable, type Column } from '../components/ui';
 import { useAppStore } from '../stores/appStore';
 import type { Client } from '../types';
-import { X, Mail, Phone, MapPin, Wrench, DollarSign, Ticket, Trash2, Edit, Calendar } from 'lucide-react';
+import { X, Mail, Phone, MapPin, Wrench, DollarSign, Ticket, Trash2, Edit, Calendar, Plus, Minus } from 'lucide-react';
 import { format } from 'date-fns';
 import { validatePhoneNumber, validateEmail } from '../utils/validation';
+
+function calcMonthlyRevenue(equipmentList: any[], clientId: string): number {
+  return equipmentList
+    .filter(e => e.clientId === clientId && e.ownershipType === 'rental' && e.rentalAmount > 0)
+    .reduce((sum, e) => sum + Number(e.rentalAmount), 0);
+}
 
 export function Clients() {
   const { clients, equipment, fetchClients, fetchEquipment, fetchTickets, addClient, updateClient, deleteClient, toggleClientActive, addTicket } = useAppStore();
@@ -14,10 +20,12 @@ export function Clients() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [formData, setFormData] = useState({
+    client_code: '',
     name: '',
     company_name: '',
+    old_company_name: '',
     email: '',
-    phone: '',
+    phones: [''] as string[],
     address: '',
     city: '',
     state: '',
@@ -28,7 +36,9 @@ export function Clients() {
     description: '',
     priority: 'medium',
     client_id: '',
+    is_billable: true,
   });
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchClients();
@@ -38,65 +48,77 @@ export function Clients() {
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setFormError(null);
+
     // Validate email
     if (formData.email) {
       const emailValidation = validateEmail(formData.email);
       if (!emailValidation.valid) {
-        alert(emailValidation.error);
+        setFormError(emailValidation.error ?? 'Invalid email.');
         return;
       }
     }
-    
-    // Validate phone
-    if (formData.phone) {
-      const phoneValidation = validatePhoneNumber(formData.phone);
+
+    // Validate and format all phone numbers
+    const validatedPhones: string[] = [];
+    for (let i = 0; i < formData.phones.length; i++) {
+      const p = formData.phones[i]?.trim() ?? '';
+      if (!p) continue;
+      const phoneValidation = validatePhoneNumber(p);
       if (!phoneValidation.valid) {
-        alert(phoneValidation.error);
+        setFormError(phoneValidation.error ?? `Invalid phone number (${i + 1}).`);
         return;
       }
-      formData.phone = phoneValidation.formatted || formData.phone;
+      validatedPhones.push(phoneValidation.formatted || p);
     }
-    
+    const phone = validatedPhones.join(', ');
+    const { phones: _p, ...rest } = formData;
     try {
-      await addClient(formData as any);
+      await addClient({ ...rest, phone } as any);
       setShowAddModal(false);
-      setFormData({ name: '', company_name: '', email: '', phone: '', address: '', city: '', state: '', industry: '' });
-    } catch (error) {
-      console.error('Failed to add client:', error);
+      setFormData({ client_code: '', name: '', company_name: '', old_company_name: '', email: '', phones: [''], address: '', city: '', state: '', industry: '' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to add client.';
+      setFormError(message);
     }
   };
 
   const handleEditClient = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedClient) return;
-    
+    setFormError(null);
+
     // Validate email
     if (formData.email) {
       const emailValidation = validateEmail(formData.email);
       if (!emailValidation.valid) {
-        alert(emailValidation.error);
+        setFormError(emailValidation.error ?? 'Invalid email.');
         return;
       }
     }
-    
-    // Validate phone
-    if (formData.phone) {
-      const phoneValidation = validatePhoneNumber(formData.phone);
+
+    // Validate and format all phone numbers
+    const validatedPhones: string[] = [];
+    for (let i = 0; i < formData.phones.length; i++) {
+      const p = formData.phones[i]?.trim() ?? '';
+      if (!p) continue;
+      const phoneValidation = validatePhoneNumber(p);
       if (!phoneValidation.valid) {
-        alert(phoneValidation.error);
+        setFormError(phoneValidation.error ?? `Invalid phone number (${i + 1}).`);
         return;
       }
-      formData.phone = phoneValidation.formatted || formData.phone;
+      validatedPhones.push(phoneValidation.formatted || p);
     }
-    
+    const phone = validatedPhones.join(', ');
+    const { phones: _p2, ...rest } = formData;
     try {
-      await updateClient(selectedClient.id, formData as any);
+      await updateClient(selectedClient.id, { ...rest, phone } as any);
       setShowEditModal(false);
       setSelectedClient(null);
-      setFormData({ name: '', company_name: '', email: '', phone: '', address: '', city: '', state: '', industry: '' });
-    } catch (error) {
-      console.error('Failed to update client:', error);
+      setFormData({ client_code: '', name: '', company_name: '', old_company_name: '', email: '', phones: [''], address: '', city: '', state: '', industry: '' });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Failed to update client.';
+      setFormError(message);
     }
   };
 
@@ -105,7 +127,7 @@ export function Clients() {
     try {
       await addTicket(ticketData as any);
       setShowTicketModal(false);
-      setTicketData({ title: '', description: '', priority: 'medium', client_id: '' });
+      setTicketData({ title: '', description: '', priority: 'medium', client_id: '', is_billable: true });
       setSelectedClient(null);
     } catch (error) {
       console.error('Failed to create ticket:', error);
@@ -114,16 +136,21 @@ export function Clients() {
 
   const openEditModal = () => {
     if (!selectedClient) return;
+    const phoneStr = selectedClient.phone || '';
+    const phones = phoneStr ? phoneStr.split(/,/).map((s) => s.trim()).filter(Boolean) : [''];
     setFormData({
+      client_code: selectedClient.clientCode || '',
       name: selectedClient.name,
       company_name: selectedClient.companyName,
+      old_company_name: selectedClient.oldCompanyName ?? '',
       email: selectedClient.email || '',
-      phone: selectedClient.phone || '',
+      phones: phones.length ? phones : [''],
       address: selectedClient.address || '',
       city: selectedClient.city || '',
       state: selectedClient.state || '',
       industry: selectedClient.industry || '',
     });
+    setFormError(null);
     setShowEditModal(true);
   };
 
@@ -134,6 +161,7 @@ export function Clients() {
       description: '',
       priority: 'medium',
       client_id: selectedClient.id,
+      is_billable: true,
     });
     setShowTicketModal(true);
   };
@@ -170,6 +198,12 @@ export function Clients() {
 
   const tableColumns: Column<Client>[] = [
     {
+      key: 'clientCode',
+      header: 'Code',
+      sortable: true,
+      render: (client) => client.clientCode ? <span className="font-mono text-sm text-primary-600">{client.clientCode}</span> : <span className="text-neutral-300">-</span>,
+    },
+    {
       key: 'companyName',
       header: 'Company',
       sortable: true,
@@ -193,36 +227,34 @@ export function Clients() {
       render: (client) => `${client.city || '-'}${client.state ? `, ${client.state}` : ''}`,
     },
     {
-      key: 'equipmentCount',
-      header: 'Equipment',
-      sortable: true,
-      render: (client) => (
-        <div className="flex items-center gap-2">
-          <Wrench className="w-4 h-4 text-neutral-400" />
-          {client.equipmentCount || 0}
-        </div>
-      ),
-    },
-    {
       key: 'robotCount',
-      header: 'Rental',
+      header: 'Robots',
       sortable: true,
-      render: (client) => (
-        <div className="flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-neutral-400" />
-          {client.robotCount || 0}
-        </div>
-      ),
+      render: (client) => {
+        const clientEq = equipment.filter(e => e.clientId === client.id);
+        const totalRobots = clientEq.reduce((sum, e) => sum + (Array.isArray(e.modelNumbers) && e.modelNumbers.length > 0 ? e.modelNumbers.length : 1), 0);
+        const rentalRobots = clientEq.filter(e => e.ownershipType === 'rental').reduce((sum, e) => sum + (Array.isArray(e.modelNumbers) && e.modelNumbers.length > 0 ? e.modelNumbers.length : 1), 0);
+        return (
+          <div className="flex items-center gap-2">
+            <Wrench className="w-4 h-4 text-neutral-400" />
+            <span>{totalRobots}</span>
+            {rentalRobots > 0 && <span className="text-xs text-primary-600 bg-primary-50 px-1.5 py-0.5 rounded">{rentalRobots} rental</span>}
+          </div>
+        );
+      },
     },
     {
       key: 'totalRevenue',
       header: 'Revenue',
       sortable: true,
-      render: (client) => (
-        <span className="font-medium text-success-600">
-          RM {(client.totalRevenue || 0).toLocaleString()}
-        </span>
-      ),
+      render: (client) => {
+        const monthly = calcMonthlyRevenue(equipment, client.id);
+        return (
+          <span className="font-medium text-success-600">
+            RM {monthly.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        );
+      },
     },
     {
       key: 'status',
@@ -300,7 +332,7 @@ export function Clients() {
         subtitle={`${clients.length} active clients`}
         showAddButton
         addButtonText="Add Client"
-        onAddClick={() => setShowAddModal(true)}
+        onAddClick={() => { setFormError(null); setShowAddModal(true); }}
       />
 
       <div className="p-6">
@@ -318,6 +350,10 @@ export function Clients() {
               </button>
             </div>
             <form onSubmit={handleAddClient} className="p-6 space-y-4">
+              <div>
+                <label className="label">Client Code</label>
+                <input type="text" className="input" placeholder="e.g. AK-001" value={formData.client_code} onChange={(e) => setFormData({ ...formData, client_code: e.target.value })} />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Contact Name *</label>
@@ -328,14 +364,51 @@ export function Clients() {
                   <input type="text" className="input" required value={formData.company_name} onChange={(e) => setFormData({ ...formData, company_name: e.target.value })} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Email</label>
-                  <input type="email" className="input" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">Phone</label>
-                  <input type="tel" className="input" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+              <div>
+                <label className="label">Old company name (optional)</label>
+                <input type="text" className="input" placeholder="Legacy name from previous system" value={formData.old_company_name} onChange={(e) => setFormData({ ...formData, old_company_name: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input type="email" className="input" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <div className="space-y-2">
+                  {formData.phones.map((p, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input
+                        type="tel"
+                        className="input flex-1"
+                        value={p}
+                        onChange={(e) => {
+                          const next = [...formData.phones];
+                          next[i] = e.target.value;
+                          setFormData({ ...formData, phones: next });
+                        }}
+                        placeholder="e.g. +60 12-345 6789"
+                      />
+                      {formData.phones.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, phones: formData.phones.filter((_, j) => j !== i) })}
+                          className="p-2 rounded-lg border border-neutral-300 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                          title="Remove number"
+                          aria-label="Remove number"
+                        >
+                          <Minus className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, phones: [...formData.phones, ''] })}
+                    className="flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add another number
+                  </button>
                 </div>
               </div>
               <div>
@@ -356,6 +429,11 @@ export function Clients() {
                   <input type="text" className="input" value={formData.industry} onChange={(e) => setFormData({ ...formData, industry: e.target.value })} />
                 </div>
               </div>
+              {formError && (
+                <div className="p-3 rounded-lg bg-danger-50 border border-danger-200 text-sm text-danger-700">
+                  {formError}
+                </div>
+              )}
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn-primary flex-1">Add Client</button>
@@ -376,6 +454,10 @@ export function Clients() {
               </button>
             </div>
             <form onSubmit={handleEditClient} className="p-6 space-y-4">
+              <div>
+                <label className="label">Client Code</label>
+                <input type="text" className="input" placeholder="e.g. AK-001" value={formData.client_code} onChange={(e) => setFormData({ ...formData, client_code: e.target.value })} />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">Contact Name *</label>
@@ -386,14 +468,51 @@ export function Clients() {
                   <input type="text" className="input" required value={formData.company_name} onChange={(e) => setFormData({ ...formData, company_name: e.target.value })} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="label">Email</label>
-                  <input type="email" className="input" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
-                </div>
-                <div>
-                  <label className="label">Phone</label>
-                  <input type="tel" className="input" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
+              <div>
+                <label className="label">Old company name (optional)</label>
+                <input type="text" className="input" placeholder="Legacy name from previous system" value={formData.old_company_name} onChange={(e) => setFormData({ ...formData, old_company_name: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input type="email" className="input" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Phone</label>
+                <div className="space-y-2">
+                  {formData.phones.map((p, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <input
+                        type="tel"
+                        className="input flex-1"
+                        value={p}
+                        onChange={(e) => {
+                          const next = [...formData.phones];
+                          next[i] = e.target.value;
+                          setFormData({ ...formData, phones: next });
+                        }}
+                        placeholder="e.g. +60 12-345 6789"
+                      />
+                      {formData.phones.length > 1 ? (
+                        <button
+                          type="button"
+                          onClick={() => setFormData({ ...formData, phones: formData.phones.filter((_, j) => j !== i) })}
+                          className="p-2 rounded-lg border border-neutral-300 text-neutral-500 hover:bg-neutral-50 hover:text-neutral-700"
+                          title="Remove number"
+                          aria-label="Remove number"
+                        >
+                          <Minus className="w-4 h-4" />
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, phones: [...formData.phones, ''] })}
+                    className="flex items-center gap-2 text-sm text-primary-600 hover:text-primary-700 font-medium"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add another number
+                  </button>
                 </div>
               </div>
               <div>
@@ -414,6 +533,11 @@ export function Clients() {
                   <input type="text" className="input" value={formData.industry} onChange={(e) => setFormData({ ...formData, industry: e.target.value })} />
                 </div>
               </div>
+              {formError && (
+                <div className="p-3 rounded-lg bg-danger-50 border border-danger-200 text-sm text-danger-700">
+                  {formError}
+                </div>
+              )}
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowEditModal(false)} className="btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn-primary flex-1">Save Changes</button>
@@ -470,6 +594,31 @@ export function Clients() {
                   <option value="critical">Critical</option>
                 </select>
               </div>
+              <div>
+                <label className="label">Billing</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable-clients"
+                      checked={ticketData.is_billable === true}
+                      onChange={() => setTicketData({ ...ticketData, is_billable: true })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Billable</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="billable-clients"
+                      checked={ticketData.is_billable === false}
+                      onChange={() => setTicketData({ ...ticketData, is_billable: false })}
+                      className="rounded-full border-neutral-300 text-primary-600"
+                    />
+                    <span>Non-billable</span>
+                  </label>
+                </div>
+              </div>
               <div className="flex gap-3 pt-4">
                 <button type="button" onClick={() => setShowTicketModal(false)} className="btn-secondary flex-1">Cancel</button>
                 <button type="submit" className="btn-primary flex-1">
@@ -503,24 +652,39 @@ export function Clients() {
             </div>
             <div className="p-6 space-y-6">
               <div className="grid grid-cols-3 gap-4">
-                <div className="p-4 bg-neutral-50 rounded-xl text-center">
-                  <Wrench className="w-6 h-6 text-primary-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-neutral-900">{selectedClient.equipmentCount || 0}</p>
-                  <p className="text-sm text-neutral-500">Equipment</p>
-                </div>
-                <div className="p-4 bg-neutral-50 rounded-xl text-center">
-                  <Calendar className="w-6 h-6 text-primary-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-neutral-900">{selectedClient.robotCount || 0}</p>
-                  <p className="text-sm text-neutral-500">Rental</p>
-                </div>
+                {(() => {
+                  const clientEq = equipment.filter(e => e.clientId === selectedClient.id);
+                  const totalRobots = clientEq.reduce((sum, e) => sum + (Array.isArray(e.modelNumbers) && e.modelNumbers.length > 0 ? e.modelNumbers.length : 1), 0);
+                  const rentalRobots = clientEq.filter(e => e.ownershipType === 'rental').reduce((sum, e) => sum + (Array.isArray(e.modelNumbers) && e.modelNumbers.length > 0 ? e.modelNumbers.length : 1), 0);
+                  return (
+                    <>
+                      <div className="p-4 bg-neutral-50 rounded-xl text-center">
+                        <Wrench className="w-6 h-6 text-primary-500 mx-auto mb-2" />
+                        <p className="text-2xl font-bold text-neutral-900">{totalRobots}</p>
+                        <p className="text-sm text-neutral-500">Robots</p>
+                      </div>
+                      <div className="p-4 bg-neutral-50 rounded-xl text-center">
+                        <Calendar className="w-6 h-6 text-primary-500 mx-auto mb-2" />
+                        <p className="text-2xl font-bold text-neutral-900">{rentalRobots}</p>
+                        <p className="text-sm text-neutral-500">On Rental</p>
+                      </div>
+                    </>
+                  );
+                })()}
                 <div className="p-4 bg-neutral-50 rounded-xl text-center">
                   <DollarSign className="w-6 h-6 text-success-500 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-neutral-900">RM {((selectedClient.totalRevenue || 0) / 1000).toFixed(0)}K</p>
-                  <p className="text-sm text-neutral-500">Revenue</p>
+                  <p className="text-2xl font-bold text-neutral-900">RM {calcMonthlyRevenue(equipment, selectedClient.id).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                  <p className="text-sm text-neutral-500">Revenue/mo</p>
                 </div>
               </div>
               <div>
                 <h4 className="font-medium text-neutral-900 mb-3">Contact Information</h4>
+                {selectedClient.oldCompanyName && (
+                  <div className="mb-3 p-3 bg-neutral-50 rounded-lg">
+                    <p className="text-xs text-neutral-500">Old company name</p>
+                    <p className="text-sm font-medium">{selectedClient.oldCompanyName}</p>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg">
                     <Mail className="w-5 h-5 text-neutral-400" />
@@ -530,10 +694,18 @@ export function Clients() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg">
-                    <Phone className="w-5 h-5 text-neutral-400" />
-                    <div>
+                    <Phone className="w-5 h-5 text-neutral-400 shrink-0" />
+                    <div className="min-w-0">
                       <p className="text-xs text-neutral-500">Phone</p>
-                      <p className="text-sm font-medium">{selectedClient.phone || '-'}</p>
+                      {selectedClient.phone ? (
+                        <div className="text-sm font-medium space-y-0.5">
+                          {(selectedClient.phone || '').split(/,/).map((num, i) => (
+                            <p key={i}>{num.trim()}</p>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-sm font-medium">-</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-lg col-span-2">
@@ -548,10 +720,10 @@ export function Clients() {
                 </div>
               </div>
               <div>
-                <h4 className="font-medium text-neutral-900 mb-3">Equipment ({getClientEquipment(selectedClient.id).length})</h4>
+                <h4 className="font-medium text-neutral-900 mb-3">Contract ({getClientEquipment(selectedClient.id).length})</h4>
                 <div className="space-y-2">
                   {getClientEquipment(selectedClient.id).length === 0 ? (
-                    <p className="text-sm text-neutral-500 text-center py-4">No equipment registered</p>
+                    <p className="text-sm text-neutral-500 text-center py-4">No contract registered</p>
                   ) : (
                     getClientEquipment(selectedClient.id).map((eq) => (
                       <div key={eq.id} className="flex items-center justify-between p-3 bg-neutral-50 rounded-lg">

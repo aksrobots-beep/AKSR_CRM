@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const PRODUCTION_API_URL = 'https://api-crm.aksuccessrobotics.com.my/api';
+const PRODUCTION_API_URL = 'https://aksr-crm.vercel.app/api';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');

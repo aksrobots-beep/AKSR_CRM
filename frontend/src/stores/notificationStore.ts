@@ -11,11 +11,23 @@ export interface Notification {
   link?: string;
 }
 
+/** API notification shape (read and createdAt as primitives) */
+export type ApiNotification = {
+  id: string;
+  title: string;
+  message: string;
+  type: string;
+  link?: string;
+  read: boolean;
+  createdAt: string;
+};
+
 interface NotificationState {
   notifications: Notification[];
   unreadCount: number;
-  
-  // Actions
+
+  /** Replace list with server data (e.g. after fetch) */
+  setNotifications: (list: ApiNotification[]) => void;
   addNotification: (notification: Omit<Notification, 'id' | 'read' | 'createdAt'>) => void;
   markAsRead: (id: string) => void;
   markAllAsRead: () => void;
@@ -23,39 +35,27 @@ interface NotificationState {
   clearAll: () => void;
 }
 
+const mapApiToNotification = (n: ApiNotification): Notification => ({
+  id: n.id,
+  type: (n.type as Notification['type']) || 'info',
+  title: n.title,
+  message: n.message || '',
+  read: n.read,
+  createdAt: new Date(n.createdAt),
+  link: n.link,
+});
+
 export const useNotificationStore = create<NotificationState>()(
   persist(
     (set) => ({
-      notifications: [
-        {
-          id: '1',
-          type: 'warning',
-          title: 'Critical Ticket',
-          message: 'Industrial oven temperature sensor replacement is overdue',
-          read: false,
-          createdAt: new Date(),
-          link: '/service',
-        },
-        {
-          id: '2',
-          type: 'info',
-          title: 'Leave Request',
-          message: 'New leave request pending approval',
-          read: false,
-          createdAt: new Date(Date.now() - 1000 * 60 * 30),
-          link: '/hr',
-        },
-        {
-          id: '3',
-          type: 'success',
-          title: 'Invoice Paid',
-          message: 'INV-2024-0002 has been fully paid',
-          read: true,
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-          link: '/accounts',
-        },
-      ],
-      unreadCount: 2,
+      notifications: [],
+      unreadCount: 0,
+
+      setNotifications: (list) => {
+        const notifications = list.map(mapApiToNotification);
+        const unreadCount = notifications.filter((n) => !n.read).length;
+        set({ notifications, unreadCount });
+      },
 
       addNotification: (notification) => {
         const newNotification: Notification = {
@@ -101,6 +101,7 @@ export const useNotificationStore = create<NotificationState>()(
     }),
     {
       name: 'ak-crm-notifications',
+      partialize: (state) => ({ notifications: state.notifications, unreadCount: state.unreadCount }),
     }
   )
 );

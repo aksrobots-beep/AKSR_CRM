@@ -47,6 +47,26 @@ async function initMySQL() {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )`,
+
+      `CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) DEFAULT NULL,
+        request_email VARCHAR(255) NOT NULL,
+        token_hash VARCHAR(64) DEFAULT NULL,
+        request_ip VARCHAR(45),
+        user_agent VARCHAR(255),
+        expires_at DATETIME DEFAULT NULL,
+        used_at DATETIME DEFAULT NULL,
+        invalidated_at DATETIME DEFAULT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_reset_token_hash (token_hash),
+        INDEX idx_reset_email_created (request_email, created_at),
+        INDEX idx_reset_ip_created (request_ip, created_at),
+        INDEX idx_reset_user (user_id),
+        INDEX idx_reset_expires (expires_at)
+      )`,
       
       `CREATE TABLE IF NOT EXISTS employees (
         id VARCHAR(36) PRIMARY KEY,
@@ -65,8 +85,10 @@ async function initMySQL() {
       
       `CREATE TABLE IF NOT EXISTS clients (
         id VARCHAR(36) PRIMARY KEY,
+        client_code VARCHAR(50) DEFAULT NULL,
         name VARCHAR(255) NOT NULL,
         company_name VARCHAR(255) NOT NULL,
+        old_company_name VARCHAR(255) DEFAULT NULL,
         email VARCHAR(255),
         phone VARCHAR(50),
         address TEXT,
@@ -103,11 +125,34 @@ async function initMySQL() {
         last_service_date DATE,
         next_service_date DATE,
         notes TEXT,
+        sim_number VARCHAR(100) NULL,
+        sim_carrier VARCHAR(100) NULL,
+        sim_phone_number VARCHAR(50) NULL,
+        sim_top_up_date DATE NULL,
+        sim_expired_date DATE NULL,
+        sim_reminder_at DATETIME NULL,
+        sim_reminder_sent TINYINT DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         created_by VARCHAR(36),
         updated_by VARCHAR(36),
         FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS equipment_sim_cards (
+        id VARCHAR(36) PRIMARY KEY,
+        equipment_id VARCHAR(36) NOT NULL,
+        sim_number VARCHAR(100) NULL,
+        sim_carrier VARCHAR(100) NULL,
+        sim_phone_number VARCHAR(50) NULL,
+        sim_top_up_date DATE NULL,
+        sim_expired_date DATE NULL,
+        sim_reminder_at DATETIME NULL,
+        sim_reminder_sent TINYINT DEFAULT 0,
+        sort_order INT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE,
+        INDEX idx_equipment_sim_reminder (equipment_id, sim_reminder_at, sim_reminder_sent)
       )`,
       
       `CREATE TABLE IF NOT EXISTS tickets (
@@ -118,6 +163,7 @@ async function initMySQL() {
         priority VARCHAR(20) DEFAULT 'medium',
         status VARCHAR(50) DEFAULT 'new',
         is_active TINYINT DEFAULT 1,
+        is_billable TINYINT DEFAULT 1,
         client_id VARCHAR(36),
         equipment_id VARCHAR(36),
         assigned_to VARCHAR(36),
@@ -151,15 +197,29 @@ async function initMySQL() {
         quantity INT DEFAULT 0,
         min_quantity INT DEFAULT 0,
         unit_price DECIMAL(12,2) DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'MYR',
         supplier VARCHAR(255),
         location VARCHAR(255),
         compatible_equipment JSON,
+        track_serial_numbers TINYINT DEFAULT 0,
         status VARCHAR(50) DEFAULT 'active',
         is_active TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         created_by VARCHAR(36),
         updated_by VARCHAR(36)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS inventory_serial_numbers (
+        id VARCHAR(36) PRIMARY KEY,
+        inventory_id VARCHAR(36) NOT NULL,
+        serial_number VARCHAR(100) NOT NULL,
+        status VARCHAR(20) DEFAULT 'available',
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_by VARCHAR(36),
+        FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_sn (inventory_id, serial_number)
       )`,
       
       `CREATE TABLE IF NOT EXISTS ticket_parts (
@@ -188,6 +248,20 @@ async function initMySQL() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
       )`,
       
+      `CREATE TABLE IF NOT EXISTS notifications (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        message TEXT,
+        type VARCHAR(20) DEFAULT 'info',
+        link VARCHAR(500),
+        is_read TINYINT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_notifications_user_read (user_id, is_read),
+        INDEX idx_notifications_created (user_id, created_at)
+      )`,
+
       `CREATE TABLE IF NOT EXISTS leave_requests (
         id VARCHAR(36) PRIMARY KEY,
         employee_id VARCHAR(36) NOT NULL,
@@ -238,6 +312,43 @@ async function initMySQL() {
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         ip_address VARCHAR(45),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS report_definitions (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        module_key VARCHAR(100) NOT NULL,
+        config_json JSON NOT NULL,
+        is_public TINYINT DEFAULT 0,
+        owner_user_id VARCHAR(36) NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS report_runs (
+        id VARCHAR(36) PRIMARY KEY,
+        report_definition_id VARCHAR(36) DEFAULT NULL,
+        requested_by VARCHAR(36) DEFAULT NULL,
+        module_key VARCHAR(100) NOT NULL,
+        format VARCHAR(10) NOT NULL,
+        status VARCHAR(20) DEFAULT 'completed',
+        row_count INT DEFAULT 0,
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (report_definition_id) REFERENCES report_definitions(id) ON DELETE SET NULL,
+        FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS report_column_policies (
+        id VARCHAR(36) PRIMARY KEY,
+        module_key VARCHAR(100) NOT NULL,
+        column_name VARCHAR(100) NOT NULL,
+        allowed_roles_json JSON,
+        is_blocked TINYINT DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_report_col_policy (module_key, column_name)
       )`,
       
       `CREATE TABLE IF NOT EXISTS suppliers (

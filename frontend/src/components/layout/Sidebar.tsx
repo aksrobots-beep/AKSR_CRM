@@ -13,6 +13,7 @@ import {
   TrendingUp,
   UserCog,
   Truck,
+  BarChart3,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -49,7 +50,7 @@ const workspaces = [
   },
   {
     id: 'equipment',
-    name: 'Equipment',
+    name: 'Contract',
     icon: Wrench,
     path: '/equipment',
     color: 'bg-warning-500',
@@ -85,6 +86,14 @@ const workspaces = [
   //   color: 'bg-rose-500',
   //   roles: ['ceo', 'admin', 'hr_manager'],
   // },
+  {
+    id: 'reports',
+    name: 'Reports',
+    icon: BarChart3,
+    path: '/reports',
+    color: 'bg-teal-500',
+    roles: ['ceo', 'admin', 'finance', 'service_manager'],
+  },
   {
     id: 'accounts',
     name: 'Accounts',

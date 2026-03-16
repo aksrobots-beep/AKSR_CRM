@@ -1,4 +1,6 @@
 export { Login } from './Login';
+export { ForgotPassword } from './ForgotPassword';
+export { ResetPassword } from './ResetPassword';
 export { Dashboard } from './Dashboard';
 export { CEODashboard } from './CEODashboard';
 export { ServiceTickets } from './ServiceTickets';
@@ -11,3 +13,4 @@ export { Users } from './Users';
 export { Settings } from './Settings';
 export { Employees } from './Employees';
 export { Suppliers } from './Suppliers';
+export { Reports } from './Reports';

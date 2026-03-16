@@ -3,6 +3,7 @@ import { Bell, Check, X, Info, AlertTriangle, CheckCircle, XCircle } from 'lucid
 import { useNotificationStore, type Notification } from '../../stores/notificationStore';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import { api } from '../../services/api';
 
 export function NotificationDropdown() {
   const [isOpen, setIsOpen] = useState(false);
@@ -31,12 +32,28 @@ export function NotificationDropdown() {
     }
   };
 
-  const handleNotificationClick = (notification: Notification) => {
-    markAsRead(notification.id);
+  const handleNotificationClick = async (notification: Notification) => {
+    if (!notification.read) {
+      try {
+        await api.markNotificationRead(notification.id);
+      } catch {
+        // Still update UI
+      }
+      markAsRead(notification.id);
+    }
     if (notification.link) {
       navigate(notification.link);
       setIsOpen(false);
     }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await api.markAllNotificationsRead();
+    } catch {
+      // Still update UI
+    }
+    markAllAsRead();
   };
 
   return (
@@ -60,7 +77,7 @@ export function NotificationDropdown() {
             <h3 className="font-semibold text-neutral-900">Notifications</h3>
             {unreadCount > 0 && (
               <button
-                onClick={markAllAsRead}
+                onClick={handleMarkAllRead}
                 className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1"
               >
                 <Check className="w-4 h-4" />

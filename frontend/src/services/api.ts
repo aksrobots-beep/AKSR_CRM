@@ -44,6 +44,29 @@ class ApiService {
     return response.json();
   }
 
+  private async requestBlob(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<Blob> {
+    const headers: HeadersInit = {
+      ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      ...options.headers,
+    };
+
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({ error: 'Request failed' }));
+      const msg = err.message || err.error || 'Request failed';
+      throw new Error(err.code ? `${msg} (${err.code})` : msg);
+    }
+
+    return response.blob();
+  }
+
   // Auth
   async login(email: string, password: string) {
     const result = await this.request<{ token: string; user: any }>('/auth/login', {
@@ -60,6 +83,25 @@ class ApiService {
 
   async getUsers() {
     return this.request<any[]>('/auth/users');
+  }
+
+  async forgotPassword(email: string) {
+    return this.request<{ message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    });
+  }
+
+  async validateResetToken(token: string) {
+    const query = new URLSearchParams({ token }).toString();
+    return this.request<{ valid: boolean; message?: string }>(`/auth/reset-password/validate?${query}`);
+  }
+
+  async resetPassword(token: string, newPassword: string, confirmPassword: string) {
+    return this.request<{ message: string }>('/auth/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({ token, newPassword, confirmPassword }),
+    });
   }
 
   // Dashboard
@@ -158,6 +200,19 @@ class ApiService {
     });
   }
 
+  // Notifications
+  async getNotifications() {
+    return this.request<Array<{ id: string; title: string; message: string; type: string; link?: string; read: boolean; createdAt: string }>>('/notifications');
+  }
+
+  async markNotificationRead(id: string) {
+    return this.request<{ ok: boolean }>(`/notifications/${id}/read`, { method: 'PATCH' });
+  }
+
+  async markAllNotificationsRead() {
+    return this.request<{ ok: boolean }>('/notifications/read-all', { method: 'PATCH' });
+  }
+
   // Equipment
   async getEquipment(params?: { type?: string; status?: string; client_id?: string }) {
     const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -217,10 +272,10 @@ class ApiService {
     });
   }
 
-  async adjustStock(id: string, adjustment: number, reason?: string) {
+  async adjustStock(id: string, adjustment: number, reason?: string, serialNumberIds?: string[]) {
     return this.request<any>(`/inventory/${id}/stock`, {
       method: 'PATCH',
-      body: JSON.stringify({ adjustment, reason }),
+      body: JSON.stringify({ adjustment, reason, serial_number_ids: serialNumberIds }),
     });
   }
 
@@ -230,6 +285,28 @@ class ApiService {
 
   async deleteInventoryItem(id: string) {
     return this.request<any>(`/inventory/${id}`, { method: 'DELETE' });
+  }
+
+  async getSerialNumbers(inventoryId: string) {
+    return this.request<any[]>(`/inventory/${inventoryId}/serial-numbers`);
+  }
+
+  async addSerialNumbers(inventoryId: string, serialNumbers: string[]) {
+    return this.request<any>(`/inventory/${inventoryId}/serial-numbers`, {
+      method: 'POST',
+      body: JSON.stringify({ serial_numbers: serialNumbers }),
+    });
+  }
+
+  async updateSerialNumber(inventoryId: string, snId: string, data: { status?: string; notes?: string }) {
+    return this.request<any>(`/inventory/${inventoryId}/serial-numbers/${snId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSerialNumber(inventoryId: string, snId: string) {
+    return this.request<any>(`/inventory/${inventoryId}/serial-numbers/${snId}`, { method: 'DELETE' });
   }
 
   async toggleInventoryActive(id: string, is_active: boolean) {
@@ -392,6 +469,54 @@ class ApiService {
     return this.request<any>(`/suppliers/${id}/active`, {
       method: 'PATCH',
       body: JSON.stringify({ is_active }),
+    });
+  }
+
+  // Reports
+  async getReportModules() {
+    return this.request<any[]>('/reports/modules');
+  }
+
+  async getReportModuleSchema(moduleKey: string) {
+    return this.request<any>(`/reports/modules/${moduleKey}/schema`);
+  }
+
+  async previewReport(data: any) {
+    return this.request<any>('/reports/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async downloadReport(data: any) {
+    return this.requestBlob('/reports/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getReportDefinitions() {
+    return this.request<any[]>('/reports/definitions');
+  }
+
+  async createReportDefinition(data: any) {
+    return this.request<any>('/reports/definitions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateReportDefinition(id: string, data: any) {
+    return this.request<any>(`/reports/definitions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteReportDefinition(id: string) {
+    return this.request<any>(`/reports/definitions/${id}`, {
+      method: 'DELETE',
     });
   }
 }

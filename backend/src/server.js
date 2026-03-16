@@ -13,6 +13,8 @@ import { invoiceRoutes } from './routes/invoices.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 // import { employeeRoutes } from './routes/employees.js';
 import { supplierRoutes } from './routes/suppliers.js';
+import { reportRoutes } from './routes/reports.js';
+import { notificationRoutes } from './routes/notifications.js';
 import { authenticateToken } from './middleware/auth.js';
 import { toSafeMessage } from './utils/errorResponse.js';
 
@@ -362,6 +364,8 @@ app.use('/api/invoices', authenticateToken, invoiceRoutes);
 app.use('/api/dashboard', authenticateToken, dashboardRoutes);
 // app.use('/api/employees', authenticateToken, employeeRoutes);
 app.use('/api/suppliers', authenticateToken, supplierRoutes);
+app.use('/api/reports', authenticateToken, reportRoutes);
+app.use('/api/notifications', authenticateToken, notificationRoutes);
 
 // 404 — if you get JSON here, request reached Node; if you still see "Cannot GET ...", the request never reached Node (proxy/config)
 app.use((req, res) => {
@@ -377,6 +381,17 @@ app.use((err, req, res, next) => {
 
 // Only listen when running directly (not on Vercel)
 if (!process.env.VERCEL) {
+  // Test database connection on startup
+  Promise.resolve()
+    .then(() => query('SELECT 1'))
+    .then(() => console.log('✅ Database connected'))
+    .catch((err) => {
+      console.error('❌ Database not connected:', err.message);
+      if (err.code) console.error('   Code:', err.code);
+      console.error('   Check backend/.env: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME');
+      console.error('   Run from backend folder: node validate-db-connection.js');
+    });
+
   app.listen(PORT, () => {
     console.log(`🚀 AK Success CRM API running on http://localhost:${PORT}`);
   });
