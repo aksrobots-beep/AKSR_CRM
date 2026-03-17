@@ -144,6 +144,14 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Allowed fields for ticket update (avoids sending non-column keys; is_billable may be missing on older DBs)
+const TICKET_UPDATE_KEYS = [
+  'title', 'description', 'priority', 'status', 'client_id', 'equipment_id', 'assigned_to',
+  'due_date', 'next_action_date', 'next_action_item', 'action_taken', 'estimated_hours', 'actual_hours',
+  'labor_cost', 'parts_cost', 'tags', 'is_billable',
+  'updated_at', 'updated_by',
+];
+
 // Update ticket
 router.put('/:id', async (req, res) => {
   try {
@@ -151,7 +159,13 @@ router.put('/:id', async (req, res) => {
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
     if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
-    const updates = { ...req.body, updated_at: now, updated_by: req.user.id };
+
+    const updates = { updated_at: now, updated_by: req.user.id };
+    for (const key of TICKET_UPDATE_KEYS) {
+      if (key === 'updated_at' || key === 'updated_by') continue;
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
     if (updates.due_date !== undefined) {
       const r = validateDate(updates.due_date, { required: false, fieldName: 'Due date' });
       if (!r.valid) return res.status(400).json({ error: r.error });
@@ -170,9 +184,13 @@ router.put('/:id', async (req, res) => {
     const effectiveIsBillable = updates.is_billable !== undefined ? updates.is_billable : currentTicket.is_billable;
 
     if (effectiveIsBillable === 1 && (targetStatus === 'resolved' || targetStatus === 'closed')) {
-      const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
-      if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
-        return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
+      try {
+        const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
+        if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
+          return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
+        }
+      } catch (invErr) {
+        console.warn('Invoice check skipped:', invErr?.message || invErr);
       }
     }
     if (updates.assigned_to && currentTicket.status === 'new') updates.status = 'assigned';
@@ -182,7 +200,20 @@ router.put('/:id', async (req, res) => {
     if (updates.labor_cost !== undefined || updates.parts_cost !== undefined) {
       updates.total_cost = (updates.labor_cost ?? currentTicket.labor_cost ?? 0) + (updates.parts_cost ?? currentTicket.parts_cost ?? 0);
     }
-    const ticket = await update('tickets', req.params.id, updates);
+
+    let ticket;
+    try {
+      ticket = await update('tickets', req.params.id, updates);
+    } catch (updateErr) {
+      const msg = updateErr?.message || '';
+      if (msg.includes('is_billable') && msg.includes('Unknown column')) {
+        delete updates.is_billable;
+        ticket = await update('tickets', req.params.id, updates);
+        console.warn('Ticket saved without is_billable (column missing). Run: npm run migrate-ticket-billable');
+      } else {
+        throw updateErr;
+      }
+    }
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
     if (updates.assigned_to && updates.assigned_to !== currentTicket.assigned_to) {
       await createNotification(updates.assigned_to, {
