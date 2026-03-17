@@ -60,10 +60,20 @@ router.get('/', async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Authentication required' });
-    const rows = await query(
-      'SELECT id, user_id, title, message, type, link, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
-      [userId]
-    );
+    let rows;
+    try {
+      rows = await query(
+        'SELECT id, user_id, title, message, type, link, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
+        [userId]
+      );
+    } catch (dbErr) {
+      const msg = dbErr?.message || '';
+      if (msg.includes("doesn't exist") || msg.includes('Unknown table')) {
+        console.warn('[notifications] Table missing, returning empty list:', msg);
+        return res.json([]);
+      }
+      throw dbErr;
+    }
     const list = (Array.isArray(rows) ? rows : []).map((r) => ({
       id: r.id,
       userId: r.user_id,
@@ -85,7 +95,13 @@ router.patch('/read-all', async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Authentication required' });
-    await query('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [userId]);
+    try {
+      await query('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [userId]);
+    } catch (dbErr) {
+      const msg = dbErr?.message || '';
+      if (msg.includes("doesn't exist") || msg.includes('Unknown table')) return res.json({ ok: true });
+      throw dbErr;
+    }
     res.json({ ok: true });
   } catch (error) {
     send500(res, 'Failed to mark all read', error);
@@ -97,7 +113,14 @@ router.patch('/:id/read', async (req, res) => {
   try {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Authentication required' });
-    const rows = await query('SELECT id FROM notifications WHERE id = ? AND user_id = ?', [req.params.id, userId]);
+    let rows;
+    try {
+      rows = await query('SELECT id FROM notifications WHERE id = ? AND user_id = ?', [req.params.id, userId]);
+    } catch (dbErr) {
+      const msg = dbErr?.message || '';
+      if (msg.includes("doesn't exist") || msg.includes('Unknown table')) return res.json({ ok: true });
+      throw dbErr;
+    }
     const row = Array.isArray(rows) && rows.length ? rows[0] : null;
     if (!row) return res.status(404).json({ error: 'Notification not found' });
     await update('notifications', req.params.id, { is_read: 1 });

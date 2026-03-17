@@ -202,18 +202,26 @@ router.put('/:id', async (req, res) => {
     }
 
     let ticket;
-    try {
-      ticket = await update('tickets', req.params.id, updates);
-    } catch (updateErr) {
-      const msg = updateErr?.message || '';
-      if (msg.includes('is_billable') && msg.includes('Unknown column')) {
-        delete updates.is_billable;
+    let lastErr;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
         ticket = await update('tickets', req.params.id, updates);
-        console.warn('Ticket saved without is_billable (column missing). Run: npm run migrate-ticket-billable');
-      } else {
-        throw updateErr;
+        lastErr = null;
+        break;
+      } catch (updateErr) {
+        lastErr = updateErr;
+        const msg = (updateErr?.message || '').toString();
+        const unknownCol = msg.match(/Unknown column '([^']+)'/);
+        if (unknownCol) {
+          const col = unknownCol[1];
+          delete updates[col];
+          console.warn(`Ticket update: stripping missing column "${col}". Run DB migrations.`);
+        } else {
+          throw updateErr;
+        }
       }
     }
+    if (lastErr) throw lastErr;
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
     if (updates.assigned_to && updates.assigned_to !== currentTicket.assigned_to) {
       await createNotification(updates.assigned_to, {
