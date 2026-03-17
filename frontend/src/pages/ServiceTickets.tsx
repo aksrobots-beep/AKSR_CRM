@@ -102,8 +102,9 @@ export function ServiceTickets() {
       setShowEditModal(false);
       setSelectedTicket(null);
       setEditData({ title: '', description: '', priority: 'medium', status: 'new', assigned_to: '', due_date: '', next_action_date: '', next_action_item: '', action_taken: '', is_billable: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to update ticket:', error);
+      alert(error?.message || 'Failed to update ticket');
     }
   };
 
@@ -193,8 +194,13 @@ export function ServiceTickets() {
     }));
   }, [tickets, clients, technicians]);
 
-  const handleDragEnd = (itemId: string, _sourceColumnId: string, targetColumnId: string) => {
-    updateTicketStatus(itemId, targetColumnId as TicketStatus);
+  const handleDragEnd = async (itemId: string, _sourceColumnId: string, targetColumnId: string) => {
+    try {
+      await updateTicketStatus(itemId, targetColumnId as TicketStatus);
+    } catch (error: any) {
+      console.error('Failed to update ticket status:', error);
+      alert(error?.message || 'Failed to update ticket status');
+    }
   };
 
   const handleItemClick = (item: { id: string }) => {

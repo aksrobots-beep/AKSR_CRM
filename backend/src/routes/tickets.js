@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { findAll, findById, findOne, insert, update, remove } from '../db/index.js';
+import { findAll, findById, findOne, findWhere, insert, update, remove } from '../db/index.js';
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
 import { createNotification } from './notifications.js';
@@ -162,13 +162,23 @@ router.put('/:id', async (req, res) => {
       if (!r.valid) return res.status(400).json({ error: r.error });
       updates.next_action_date = r.value ?? null;
     }
+    if (updates.is_billable !== undefined) {
+      updates.is_billable = (updates.is_billable === false || updates.is_billable === 'false' || updates.is_billable === 0) ? 0 : 1;
+    }
+
+    const targetStatus = updates.status || currentTicket.status;
+    const effectiveIsBillable = updates.is_billable !== undefined ? updates.is_billable : currentTicket.is_billable;
+
+    if (effectiveIsBillable === 1 && (targetStatus === 'resolved' || targetStatus === 'closed')) {
+      const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
+      if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
+        return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
+      }
+    }
     if (updates.assigned_to && currentTicket.status === 'new') updates.status = 'assigned';
     if (updates.status === 'resolved' && currentTicket.status !== 'resolved') updates.resolved_at = now;
     if (updates.status === 'closed' && currentTicket.status !== 'closed') updates.closed_at = now;
     if (updates.tags && Array.isArray(updates.tags)) updates.tags = JSON.stringify(updates.tags);
-    if (updates.is_billable !== undefined) {
-      updates.is_billable = (updates.is_billable === false || updates.is_billable === 'false' || updates.is_billable === 0) ? 0 : 1;
-    }
     if (updates.labor_cost !== undefined || updates.parts_cost !== undefined) {
       updates.total_cost = (updates.labor_cost ?? currentTicket.labor_cost ?? 0) + (updates.parts_cost ?? currentTicket.parts_cost ?? 0);
     }
@@ -249,6 +259,14 @@ router.patch('/:id/status', async (req, res) => {
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
     if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+
+    if (currentTicket.is_billable === 1 && (status === 'resolved' || status === 'closed')) {
+      const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
+      if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
+        return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
+      }
+    }
+
     const updates = { status, updated_at: now, updated_by: req.user.id };
     if (status === 'resolved') updates.resolved_at = now;
     if (status === 'closed') updates.closed_at = now;
