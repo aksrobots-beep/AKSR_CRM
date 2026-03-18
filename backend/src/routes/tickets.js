@@ -4,8 +4,53 @@ import { findAll, findById, findOne, findWhere, insert, update, remove } from '.
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
 import { createNotification } from './notifications.js';
+import { sendReminderEmail } from '../services/email.js';
 
 const router = Router();
+
+const baseUrl = () => process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+
+function getAccountsEmails() {
+  const raw = process.env.ACCOUNTS_TEAM_EMAILS || process.env.ACCOUNTS_EMAILS || process.env.ACCOUNTS_EMAIL || '';
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+async function requestBillingByEmail({ ticket, actorUserId }) {
+  const to = getAccountsEmails();
+  if (!to.length) {
+    console.log('[billing request] Skipped (no ACCOUNTS_TEAM_EMAILS configured)', { ticketId: ticket?.id });
+    return { sent: false, reason: 'no_accounts_emails' };
+  }
+
+  const link = `${baseUrl()}/service`;
+  const title = `Billing request: ${ticket?.ticket_number || ticket?.id || 'Ticket'}`;
+  const message = [
+    `Ticket: ${ticket?.title || ''}`.trim(),
+    ticket?.ticket_number ? `Ticket No: ${ticket.ticket_number}` : '',
+    ticket?.priority ? `Priority: ${ticket.priority}` : '',
+    ticket?.status ? `Status: ${ticket.status}` : '',
+    actorUserId ? `Requested by user: ${actorUserId}` : '',
+  ].filter(Boolean).join('\n');
+
+  const result = await sendReminderEmail({
+    to: to.join(','),
+    name: 'Accounts Team',
+    title,
+    message,
+    link,
+  });
+
+  if (!result.sent) {
+    console.log('[billing request] Email not sent', { to, ticketId: ticket?.id, reason: result.reason || 'unknown' });
+  } else {
+    console.log('[billing request] Email sent', { to, ticketId: ticket?.id, at: new Date().toISOString() });
+  }
+
+  return result;
+}
 
 // Generate ticket number
 async function generateTicketNumber() {
@@ -179,20 +224,13 @@ router.put('/:id', async (req, res) => {
     if (updates.is_billable !== undefined) {
       updates.is_billable = (updates.is_billable === false || updates.is_billable === 'false' || updates.is_billable === 0) ? 0 : 1;
     }
+    // Empty string breaks FK: assigned_to references users(id); normalize to null
+    if (updates.assigned_to === '') updates.assigned_to = null;
+    if (updates.client_id === '') updates.client_id = null;
+    if (updates.equipment_id === '') updates.equipment_id = null;
 
     const targetStatus = updates.status || currentTicket.status;
     const effectiveIsBillable = updates.is_billable !== undefined ? updates.is_billable : currentTicket.is_billable;
-
-    if (effectiveIsBillable === 1 && (targetStatus === 'resolved' || targetStatus === 'closed')) {
-      try {
-        const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
-        if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
-          return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
-        }
-      } catch (invErr) {
-        console.warn('Invoice check skipped:', invErr?.message || invErr);
-      }
-    }
     if (updates.assigned_to && currentTicket.status === 'new') updates.status = 'assigned';
     if (updates.status === 'resolved' && currentTicket.status !== 'resolved') updates.resolved_at = now;
     if (updates.status === 'closed' && currentTicket.status !== 'closed') updates.closed_at = now;
@@ -222,6 +260,15 @@ router.put('/:id', async (req, res) => {
       }
     }
     if (lastErr) throw lastErr;
+
+    if (
+      effectiveIsBillable === 1 &&
+      (targetStatus === 'resolved' || targetStatus === 'closed') &&
+      targetStatus !== currentTicket.status
+    ) {
+      await requestBillingByEmail({ ticket, actorUserId: req.user?.id });
+    }
+
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
     if (updates.assigned_to && updates.assigned_to !== currentTicket.assigned_to) {
       await createNotification(updates.assigned_to, {
@@ -299,13 +346,6 @@ router.patch('/:id/status', async (req, res) => {
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
     if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
-    if (currentTicket.is_billable === 1 && (status === 'resolved' || status === 'closed')) {
-      const relatedInvoices = await findWhere('invoices', 'ticket_id = ?', [req.params.id]);
-      if (!Array.isArray(relatedInvoices) || relatedInvoices.length === 0) {
-        return res.status(400).json({ error: 'Billable tickets must have an invoice before they can be resolved or closed.' });
-      }
-    }
-
     const updates = { status, updated_at: now, updated_by: req.user.id };
     if (status === 'resolved') updates.resolved_at = now;
     if (status === 'closed') updates.closed_at = now;
@@ -324,6 +364,15 @@ router.patch('/:id/status', async (req, res) => {
       console.warn('Status audit log skipped:', auditErr?.message || auditErr);
     }
     const ticket = await update('tickets', req.params.id, updates);
+
+    if (
+      currentTicket.is_billable === 1 &&
+      (status === 'resolved' || status === 'closed') &&
+      status !== currentTicket.status
+    ) {
+      await requestBillingByEmail({ ticket, actorUserId: req.user?.id });
+    }
+
     res.json(ticket);
   } catch (error) {
     console.error('Update ticket status error:', error?.message || error, 'code:', error?.code);
