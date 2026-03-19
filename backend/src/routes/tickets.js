@@ -79,7 +79,7 @@ router.get('/', async (req, res) => {
       findAll('users'),
     ]);
     let tickets = ticketsData;
-    if (userRole === 'technician') tickets = tickets.filter(t => t.assigned_to === userId);
+    if (userRole === 'technician') tickets = tickets.filter(t => t.assigned_to === userId || t.created_by === userId);
     if (status) tickets = tickets.filter(t => t.status === status);
     if (priority) tickets = tickets.filter(t => t.priority === priority);
     if (assigned_to) tickets = tickets.filter(t => t.assigned_to === assigned_to);
@@ -102,7 +102,7 @@ router.get('/:id', async (req, res) => {
   try {
     const ticket = await findById('tickets', req.params.id);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && ticket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician' && ticket.assigned_to !== req.user.id && ticket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
     const [c, e, a] = await Promise.all([
       findById('clients', ticket.client_id),
       ticket.equipment_id ? findById('equipment', ticket.equipment_id) : null,
@@ -140,6 +140,10 @@ router.post('/', async (req, res) => {
     const { title, description, priority, client_id, equipment_id, assigned_to, due_date, next_action_date, next_action_item, action_taken, estimated_hours, tags, is_billable: isBillableRaw } = req.body;
     if (!title || !client_id) return res.status(400).json({ error: 'Title and client are required' });
     const is_billable = (isBillableRaw === false || isBillableRaw === 'false' || isBillableRaw === 0) ? 0 : 1;
+    // Technicians can create tickets; if they don't assign to anyone, assign to themselves so the ticket appears in their list
+    const effectiveAssignedTo = (req.user.role === 'technician' && (assigned_to === '' || assigned_to === null || assigned_to === undefined))
+      ? req.user.id
+      : (assigned_to || null);
     const dueResult = validateDate(due_date, { required: false, fieldName: 'Due date' });
     if (!dueResult.valid) return res.status(400).json({ error: dueResult.error });
     const nextResult = validateDate(next_action_date, { required: false, fieldName: 'Next action date' });
@@ -151,10 +155,10 @@ router.post('/', async (req, res) => {
       title,
       description: description || '',
       priority: priority || 'medium',
-      status: assigned_to ? 'assigned' : 'new',
+      status: effectiveAssignedTo ? 'assigned' : 'new',
       client_id,
       equipment_id: equipment_id || null,
-      assigned_to: assigned_to || null,
+      assigned_to: effectiveAssignedTo,
       due_date: dueResult.value || null,
       next_action_date: nextResult.value || null,
       next_action_item: next_action_item || '',
@@ -205,7 +209,7 @@ router.put('/:id', async (req, res) => {
     const now = new Date().toISOString();
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id && currentTicket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
     const updates = { updated_at: now, updated_by: req.user.id };
     for (const key of TICKET_UPDATE_KEYS) {
@@ -305,6 +309,7 @@ router.patch('/:id/assign', async (req, res) => {
     const now = toMySQLDatetime(new Date());
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
+    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id && currentTicket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
     const updates = {
       assigned_to: assigned_to || null,
       updated_at: now,
@@ -350,7 +355,7 @@ router.patch('/:id/status', async (req, res) => {
     const now = toMySQLDatetime(new Date());
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id && currentTicket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
 
     const updates = { status, updated_at: now, updated_by: req.user.id };
     if (status === 'resolved') updates.resolved_at = now;

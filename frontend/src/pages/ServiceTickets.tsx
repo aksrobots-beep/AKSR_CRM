@@ -329,7 +329,7 @@ export function ServiceTickets() {
         title="Service Tickets" 
         subtitle={isTechnician ? `${tickets.length} assigned to you` : `${tickets.length} total tickets`} 
         showViewToggle 
-        showAddButton={!isTechnician}
+        showAddButton={true}
         addButtonText="New Ticket" 
         onAddClick={() => setShowAddModal(true)} 
       />
