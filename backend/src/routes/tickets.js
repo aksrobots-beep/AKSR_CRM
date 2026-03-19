@@ -18,12 +18,14 @@ function getAccountsEmails() {
     .filter(Boolean);
 }
 
-async function requestBillingByEmail({ ticket, actorUserId }) {
+async function requestBillingByEmail({ ticket, actorUserId, previousStatus }) {
   const to = getAccountsEmails();
   if (!to.length) {
-    console.log('[billing request] Skipped (no ACCOUNTS_TEAM_EMAILS configured)', { ticketId: ticket?.id });
+    console.log('[billing request] Skipped: ACCOUNTS_TEAM_EMAILS (or ACCOUNTS_EMAILS) not set in env', { ticketId: ticket?.id });
     return { sent: false, reason: 'no_accounts_emails' };
   }
+
+  console.log('[billing request] Sending to', to.join(', '), 'for ticket', ticket?.ticket_number || ticket?.id, 'previousStatus=', previousStatus);
 
   const link = `${baseUrl()}/service`;
   const title = `Billing request: ${ticket?.ticket_number || ticket?.id || 'Ticket'}`;
@@ -266,7 +268,11 @@ router.put('/:id', async (req, res) => {
       (targetStatus === 'resolved' || targetStatus === 'closed') &&
       targetStatus !== currentTicket.status
     ) {
-      await requestBillingByEmail({ ticket, actorUserId: req.user?.id });
+      await requestBillingByEmail({ ticket, actorUserId: req.user?.id, previousStatus: currentTicket.status });
+    } else if (effectiveIsBillable !== 1 && (targetStatus === 'resolved' || targetStatus === 'closed') && targetStatus !== currentTicket.status) {
+      console.log('[billing request] Skipped: ticket not billable', { ticketId: req.params.id, is_billable: effectiveIsBillable });
+    } else if (effectiveIsBillable === 1 && (targetStatus === 'resolved' || targetStatus === 'closed') && targetStatus === currentTicket.status) {
+      console.log('[billing request] Skipped: status unchanged (already ' + targetStatus + ')', { ticketId: req.params.id });
     }
 
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
@@ -370,7 +376,11 @@ router.patch('/:id/status', async (req, res) => {
       (status === 'resolved' || status === 'closed') &&
       status !== currentTicket.status
     ) {
-      await requestBillingByEmail({ ticket, actorUserId: req.user?.id });
+      await requestBillingByEmail({ ticket, actorUserId: req.user?.id, previousStatus: currentTicket.status });
+    } else if (currentTicket.is_billable !== 1 && (status === 'resolved' || status === 'closed')) {
+      console.log('[billing request] Skipped: ticket not billable (is_billable=' + currentTicket.is_billable + ')', { ticketId: req.params.id });
+    } else if (status === currentTicket.status) {
+      console.log('[billing request] Skipped: status unchanged', { ticketId: req.params.id, status });
     }
 
     res.json(ticket);

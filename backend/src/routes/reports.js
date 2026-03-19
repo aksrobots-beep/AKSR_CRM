@@ -37,11 +37,20 @@ function toCsv(rows, columns) {
 }
 
 async function writeReportRun({ reportDefinitionId = null, userId, moduleKey, format, status, rowCount = 0, errorMessage = null }) {
-  await query(
-    `INSERT INTO report_runs (id, report_definition_id, requested_by, module_key, format, status, row_count, error_message, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-    [uuidv4(), reportDefinitionId, userId, moduleKey, format, status, rowCount, errorMessage]
-  );
+  try {
+    await query(
+      `INSERT INTO report_runs (id, report_definition_id, requested_by, module_key, format, status, row_count, error_message, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [uuidv4(), reportDefinitionId, userId, moduleKey, format, status, rowCount, errorMessage]
+    );
+  } catch (err) {
+    const msg = err?.message || '';
+    if (msg.includes("doesn't exist") || msg.includes('Unknown table')) {
+      console.warn('[reports] report_runs table missing, skipping run log');
+    } else {
+      throw err;
+    }
+  }
 }
 
 router.get('/modules', async (req, res) => {
@@ -163,14 +172,24 @@ router.post('/download', async (req, res) => {
 
 router.get('/definitions', async (req, res) => {
   try {
-    const rows = await query(
-      `SELECT rd.*, u.name AS owner_name
-       FROM report_definitions rd
-       LEFT JOIN users u ON u.id = rd.owner_user_id
-       WHERE rd.owner_user_id = ? OR rd.is_public = 1
-       ORDER BY rd.updated_at DESC`,
-      [req.user.id]
-    );
+    let rows;
+    try {
+      rows = await query(
+        `SELECT rd.*, u.name AS owner_name
+         FROM report_definitions rd
+         LEFT JOIN users u ON u.id = rd.owner_user_id
+         WHERE rd.owner_user_id = ? OR rd.is_public = 1
+         ORDER BY rd.updated_at DESC`,
+        [req.user.id]
+      );
+    } catch (dbErr) {
+      const msg = dbErr?.message || '';
+      if (msg.includes("doesn't exist") || msg.includes('Unknown table')) {
+        console.warn('[reports] report_definitions table missing, returning empty list');
+        return res.json([]);
+      }
+      throw dbErr;
+    }
     res.json(
       rows.map((r) => ({
         ...r,

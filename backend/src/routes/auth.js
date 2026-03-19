@@ -12,10 +12,10 @@ const router = Router();
 const FORGOT_GENERIC_MESSAGE = 'If an account exists for this email, a reset link has been sent.';
 const RESET_TOKEN_BYTES = parseInt(process.env.RESET_TOKEN_BYTES || '32', 10);
 const RESET_TOKEN_EXPIRES_MINUTES = parseInt(process.env.RESET_TOKEN_EXPIRES_MINUTES || '30', 10);
-const FORGOT_RATE_LIMIT_EMAIL_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_MAX || '3', 10);
-const FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES || '30', 10);
-const FORGOT_RATE_LIMIT_IP_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_IP_MAX || '5', 10);
-const FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES || '15', 10);
+const FORGOT_RATE_LIMIT_EMAIL_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_MAX || '10', 10);
+const FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_EMAIL_WINDOW_MINUTES || '60', 10);
+const FORGOT_RATE_LIMIT_IP_MAX = parseInt(process.env.FORGOT_RATE_LIMIT_IP_MAX || '20', 10);
+const FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES = parseInt(process.env.FORGOT_RATE_LIMIT_IP_WINDOW_MINUTES || '60', 10);
 
 function toSqlDateTime(date) {
   return date.toISOString().slice(0, 19).replace('T', ' ');

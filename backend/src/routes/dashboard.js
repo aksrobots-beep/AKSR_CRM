@@ -4,16 +4,29 @@ import { send500 } from '../utils/errorResponse.js';
 
 const router = Router();
 
+async function safeFindAll(table) {
+  try {
+    return await findAll(table);
+  } catch (err) {
+    const msg = err?.message || '';
+    if (msg.includes("doesn't exist") || msg.includes('Unknown table')) {
+      console.warn(`[dashboard] Table '${table}' missing, returning empty list`);
+      return [];
+    }
+    throw err;
+  }
+}
+
 // Get dashboard stats
 router.get('/stats', async (req, res) => {
   try {
     const [tickets, clients, equipment, invoices, leaveRequests, inventory] = await Promise.all([
-      findAll('tickets'),
-      findAll('clients'),
-      findAll('equipment'),
-      findAll('invoices'),
-      findAll('leave_requests'),
-      findAll('inventory'),
+      safeFindAll('tickets'),
+      safeFindAll('clients'),
+      safeFindAll('equipment'),
+      safeFindAll('invoices'),
+      safeFindAll('leave_requests'),
+      safeFindAll('inventory'),
     ]);
 
     const ticketStats = {
@@ -63,10 +76,10 @@ router.get('/stats', async (req, res) => {
 router.get('/activity', async (req, res) => {
   try {
     const [ticketsData, clientsData, auditLogsData, usersData] = await Promise.all([
-      findAll('tickets'),
-      findAll('clients'),
-      findAll('audit_logs'),
-      findAll('users'),
+      safeFindAll('tickets'),
+      safeFindAll('clients'),
+      safeFindAll('audit_logs'),
+      safeFindAll('users'),
     ]);
     const tickets = ticketsData
       .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
@@ -92,7 +105,7 @@ router.get('/activity', async (req, res) => {
 // Get ticket distribution by status
 router.get('/tickets/distribution', async (req, res) => {
   try {
-    const tickets = await findAll('tickets');
+    const tickets = await safeFindAll('tickets');
     const statusCounts = {};
     tickets.forEach(t => { statusCounts[t.status] = (statusCounts[t.status] || 0) + 1; });
     res.json(Object.entries(statusCounts).map(([status, count]) => ({ status, count })));

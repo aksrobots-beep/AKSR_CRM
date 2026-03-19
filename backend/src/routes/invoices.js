@@ -25,14 +25,13 @@ router.get('/', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
     if (status) invoices = invoices.filter(i => i.status === status);
     if (client_id) invoices = invoices.filter(i => i.client_id === client_id);
     
-    // Add client name and parse items
     const result = await Promise.all(invoices.map(async (inv) => {
       const client = await findById('clients', inv.client_id);
-      return {
-        ...inv,
-        client_name: client?.company_name,
-        items: JSON.parse(inv.items || '[]'),
-      };
+      let items = inv.items || [];
+      if (typeof items === 'string') {
+        try { items = JSON.parse(items); } catch { items = []; }
+      }
+      return { ...inv, client_name: client?.company_name, items };
     }));
     
     res.json(result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
@@ -48,7 +47,9 @@ router.get('/:id', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
     const invoice = await findById('invoices', req.params.id);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     const c = await findById('clients', invoice.client_id);
-    res.json({ ...invoice, client_name: c?.company_name, client_email: c?.email, client_address: c?.address, city: c?.city, state: c?.state, postal_code: c?.postal_code, items: typeof invoice.items === 'string' ? JSON.parse(invoice.items || '[]') : (invoice.items || []) });
+    let items = invoice.items || [];
+    if (typeof items === 'string') { try { items = JSON.parse(items); } catch { items = []; } }
+    res.json({ ...invoice, client_name: c?.company_name, client_email: c?.email, client_address: c?.address, city: c?.city, state: c?.state, postal_code: c?.postal_code, items });
   } catch (error) {
     console.error('Get invoice error:', error);
     send500(res, 'Failed to get invoice', error);
@@ -122,7 +123,9 @@ router.put('/:id', requireRole('ceo', 'admin', 'finance'), async (req, res) => {
     if (items) { const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0); const tax = subtotal * ((tax_rate || 6) / 100); updates.items = JSON.stringify(items); updates.subtotal = subtotal; updates.tax = tax; updates.total = subtotal + tax; }
     const invoice = await update('invoices', req.params.id, updates);
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
-    res.json({ ...invoice, items: typeof invoice.items === 'string' ? JSON.parse(invoice.items) : (invoice.items || []) });
+    let parsedItems = invoice.items || [];
+    if (typeof parsedItems === 'string') { try { parsedItems = JSON.parse(parsedItems); } catch { parsedItems = []; } }
+    res.json({ ...invoice, items: parsedItems });
   } catch (error) {
     console.error('Update invoice error:', error);
     send500(res, 'Failed to update invoice', error);
@@ -142,7 +145,9 @@ router.patch('/:id/payment', requireRole('ceo', 'admin', 'finance'), requireAppr
     const client = await findById('clients', invoice.client_id);
     if (client) await update('clients', invoice.client_id, { total_revenue: (client.total_revenue || 0) + amount });
     const updated = await update('invoices', req.params.id, { paid_amount: newPaidAmount, status: newStatus, updated_at: now, updated_by: req.user.id });
-    res.json({ ...updated, items: typeof updated.items === 'string' ? JSON.parse(updated.items) : (updated.items || []) });
+    let pItems = updated.items || [];
+    if (typeof pItems === 'string') { try { pItems = JSON.parse(pItems); } catch { pItems = []; } }
+    res.json({ ...updated, items: pItems });
   } catch (error) {
     send500(res, 'Failed to record payment', error);
   }

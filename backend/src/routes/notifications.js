@@ -18,16 +18,25 @@ export async function createNotification(userId, data) {
   if (!userId) return;
   const id = uuidv4();
   const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-  await insert('notifications', {
-    id,
-    user_id: userId,
-    title: data.title || 'Notification',
-    message: data.message || '',
-    type: data.type || 'info',
-    link: data.link || null,
-    is_read: 0,
-    created_at: now,
-  });
+  try {
+    await insert('notifications', {
+      id,
+      user_id: userId,
+      title: data.title || 'Notification',
+      message: data.message || '',
+      type: data.type || 'info',
+      link: data.link || null,
+      is_read: 0,
+      created_at: now,
+    });
+  } catch (dbErr) {
+    const msg = dbErr?.message || '';
+    if (msg.includes("doesn't exist") || msg.includes('Unknown table')) {
+      console.warn('[createNotification] notifications table missing, skipping insert');
+    } else {
+      throw dbErr;
+    }
+  }
 
   // Send reminder to employee email
   try {

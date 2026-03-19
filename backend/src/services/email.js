@@ -26,6 +26,7 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
   const cfg = getSmtpConfig();
   const subject = 'Reset your password';
   const displayName = name || 'there';
+  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
 
   const text = [
     `Hi ${displayName},`,
@@ -67,6 +68,7 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
+    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
   });
 
   await transporter.sendMail({
@@ -89,6 +91,7 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
   const cfg = getSmtpConfig();
   const displayName = name || 'there';
   const appName = 'AK Success CRM';
+  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
   const text = [
     `Hi ${displayName},`,
     '',
@@ -119,6 +122,7 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
+    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
   });
 
   const subject = title || 'Reminder - AK Success CRM';
