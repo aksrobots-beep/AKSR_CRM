@@ -1,13 +1,14 @@
 import nodemailer from 'nodemailer';
 
 function getSmtpConfig() {
-  const host = process.env.SMTP_HOST || '';
-  const port = parseInt(process.env.SMTP_PORT || '587', 10);
-  const user = process.env.SMTP_USER || '';
-  const pass = process.env.SMTP_PASS || '';
-  const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
-  const from = process.env.SMTP_FROM || process.env.MAIL_FROM || user || 'no-reply@example.com';
-  const smtpServername = process.env.SMTP_TLS_SERVERNAME || '';
+  const t = (v) => (v || '').replace(/[\r\n]+/g, '').trim();
+  const host = t(process.env.SMTP_HOST);
+  const port = parseInt(t(process.env.SMTP_PORT) || '587', 10);
+  const user = t(process.env.SMTP_USER);
+  const pass = t(process.env.SMTP_PASS);
+  const secure = t(process.env.SMTP_SECURE).toLowerCase() === 'true' || port === 465;
+  const from = t(process.env.SMTP_FROM) || t(process.env.MAIL_FROM) || user || 'no-reply@example.com';
+  const smtpServername = t(process.env.SMTP_TLS_SERVERNAME);
 
   if (!host || !user || !pass) {
     return { configured: false, from };
