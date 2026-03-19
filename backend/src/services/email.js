@@ -7,10 +7,21 @@ function getSmtpConfig() {
   const pass = process.env.SMTP_PASS || '';
   const secure = String(process.env.SMTP_SECURE || '').toLowerCase() === 'true' || port === 465;
   const from = process.env.SMTP_FROM || process.env.MAIL_FROM || user || 'no-reply@example.com';
+  const smtpServername = process.env.SMTP_TLS_SERVERNAME || '';
 
   if (!host || !user || !pass) {
     return { configured: false, from };
   }
+
+  // Build TLS options:
+  // - If host is an IP, the cert won't match; use rejectUnauthorized:false
+  //   or set SMTP_TLS_SERVERNAME to the hostname on the cert.
+  // - SMTP_IGNORE_TLS_ERRORS=true also disables certificate checks.
+  const isIp = /^\d+\.\d+\.\d+\.\d+$/.test(host);
+  const ignoreTls = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
+  const tls = {};
+  if (ignoreTls || isIp) tls.rejectUnauthorized = false;
+  if (smtpServername) tls.servername = smtpServername;
 
   return {
     configured: true,
@@ -19,6 +30,7 @@ function getSmtpConfig() {
     secure,
     auth: { user, pass },
     from,
+    tls: Object.keys(tls).length ? tls : undefined,
   };
 }
 
@@ -26,7 +38,6 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
   const cfg = getSmtpConfig();
   const subject = 'Reset your password';
   const displayName = name || 'there';
-  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
 
   const text = [
     `Hi ${displayName},`,
@@ -68,7 +79,7 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
-    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
+    tls: cfg.tls,
   });
 
   await transporter.sendMail({
@@ -91,7 +102,6 @@ export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, tick
   const displayName = assigneeName || 'there';
   const appName = 'AK Success CRM';
   const subject = `Task assigned to you: ${ticketNumber || 'Service Ticket'} - AK Success CRM`;
-  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
 
   const text = [
     `Hi ${displayName},`,
@@ -131,7 +141,7 @@ export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, tick
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
-    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
+    tls: cfg.tls,
   });
 
   try {
@@ -158,7 +168,6 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
   const cfg = getSmtpConfig();
   const displayName = name || 'there';
   const appName = 'AK Success CRM';
-  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
   const text = [
     `Hi ${displayName},`,
     '',
@@ -189,7 +198,7 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.auth,
-    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
+    tls: cfg.tls,
   });
 
   const subject = title || 'Reminder - AK Success CRM';

@@ -58,6 +58,7 @@ export function ServiceTickets() {
 
   const isTechnician = user?.role === 'technician';
   const canAssign = hasPermission(['ceo', 'admin', 'service_manager']);
+  const today = new Date().toISOString().slice(0, 10);
 
   useEffect(() => {
     fetchTickets();
@@ -81,6 +82,8 @@ export function ServiceTickets() {
     if (!dueResult.valid) { alert(dueResult.error); return; }
     const nextResult = validateDate(formData.next_action_date, { required: false, fieldName: 'Next action date' });
     if (!nextResult.valid) { alert(nextResult.error); return; }
+    if (formData.due_date && formData.due_date < today) { alert('Due date cannot be in the past'); return; }
+    if (formData.next_action_date && formData.next_action_date < today) { alert('Next action date cannot be in the past'); return; }
     try {
       await addTicket(formData as any);
       setShowAddModal(false);
@@ -417,7 +420,7 @@ export function ServiceTickets() {
                   <DatePickerField
                     value={formData.due_date}
                     onChange={(v) => setFormData({ ...formData, due_date: v })}
-                    min={DATE_INPUT_MIN}
+                    min={today}
                     max={DATE_INPUT_MAX}
                   />
                 </div>
@@ -426,7 +429,7 @@ export function ServiceTickets() {
                   <DatePickerField
                     value={formData.next_action_date}
                     onChange={(v) => setFormData({ ...formData, next_action_date: v })}
-                    min={DATE_INPUT_MIN}
+                    min={today}
                     max={DATE_INPUT_MAX}
                   />
                 </div>

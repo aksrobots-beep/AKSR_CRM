@@ -148,6 +148,9 @@ router.post('/', async (req, res) => {
     if (!dueResult.valid) return res.status(400).json({ error: dueResult.error });
     const nextResult = validateDate(next_action_date, { required: false, fieldName: 'Next action date' });
     if (!nextResult.valid) return res.status(400).json({ error: nextResult.error });
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (dueResult.value && dueResult.value < todayStr) return res.status(400).json({ error: 'Due date cannot be in the past' });
+    if (nextResult.value && nextResult.value < todayStr) return res.status(400).json({ error: 'Next action date cannot be in the past' });
     const now = new Date().toISOString();
     const ticket = {
       id: uuidv4(),
