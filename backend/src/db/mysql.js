@@ -5,6 +5,11 @@ let pool = null;
 
 export async function getConnection() {
   if (!pool) {
+    // Use a small pool in serverless (Vercel) to avoid exceeding DB max_user_connections.
+    // Each serverless instance can create its own pool; limit per instance to 1–2.
+    const limit = process.env.DB_CONNECTION_LIMIT
+      ? Math.max(1, parseInt(process.env.DB_CONNECTION_LIMIT, 10) || 2)
+      : (process.env.VERCEL ? 2 : 10);
     pool = mysql.createPool({
       host: process.env.DB_HOST || 'localhost',
       port: parseInt(process.env.DB_PORT) || 3306,
@@ -12,7 +17,7 @@ export async function getConnection() {
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit: limit,
       queueLimit: 0,
     });
   }
