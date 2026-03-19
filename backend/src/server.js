@@ -166,8 +166,23 @@ app.get('/api/health', async (req, res) => {
     return healthDbHandler(req, res);
   }
   
+  // SMTP diagnostic
+  if (req.query.check === 'smtp') {
+    const pass = process.env.SMTP_PASS || '';
+    return res.json({
+      smtp_host: process.env.SMTP_HOST || '(not set)',
+      smtp_port: process.env.SMTP_PORT || '(not set)',
+      smtp_user: process.env.SMTP_USER || '(not set)',
+      smtp_pass_length: pass.length,
+      smtp_pass_first2: pass.slice(0, 2),
+      smtp_pass_last2: pass.slice(-2),
+      smtp_secure: process.env.SMTP_SECURE || '(not set)',
+      smtp_from: process.env.SMTP_FROM || '(not set)',
+    });
+  }
+
   // Default health check — version helps verify deployment
-  res.json({ status: 'ok', version: '2026-02-19-v2', timestamp: new Date().toISOString(), db_name: process.env.DB_NAME || '(not set)', db_host: process.env.DB_HOST || '(not set)' });
+  res.json({ status: 'ok', version: '2026-03-19-v3', timestamp: new Date().toISOString(), db_name: process.env.DB_NAME || '(not set)', db_host: process.env.DB_HOST || '(not set)' });
 });
 app.get('/health', async (req, res) => {
   if (req.query.db === '1' || req.query.check === 'db') {
