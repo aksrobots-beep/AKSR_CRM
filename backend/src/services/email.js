@@ -84,6 +84,73 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
 }
 
 /**
+ * Send an email when a service ticket is assigned to a user.
+ */
+export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, ticketTitle, priority = 'medium', link }) {
+  const cfg = getSmtpConfig();
+  const displayName = assigneeName || 'there';
+  const appName = 'AK Success CRM';
+  const subject = `Task assigned to you: ${ticketNumber || 'Service Ticket'} - AK Success CRM`;
+  const ignoreTlsErrors = String(process.env.SMTP_IGNORE_TLS_ERRORS || '').toLowerCase() === 'true';
+
+  const text = [
+    `Hi ${displayName},`,
+    '',
+    'A service ticket has been assigned to you.',
+    '',
+    `Ticket: ${ticketNumber || '—'}`,
+    `Title: ${ticketTitle || '—'}`,
+    `Priority: ${priority}`,
+    '',
+    link ? `View in CRM: ${link}` : '',
+    '',
+    appName,
+  ].join('\n');
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height:1.5; color:#222;">
+      <p>Hi ${displayName},</p>
+      <p>A service ticket has been assigned to you.</p>
+      <table style="border-collapse: collapse; margin: 16px 0;">
+        <tr><td style="padding:6px 12px 6px 0; color:#555;">Ticket</td><td style="padding:6px 0;"><strong>${ticketNumber || '—'}</strong></td></tr>
+        <tr><td style="padding:6px 12px 6px 0; color:#555;">Title</td><td style="padding:6px 0;">${ticketTitle || '—'}</td></tr>
+        <tr><td style="padding:6px 12px 6px 0; color:#555;">Priority</td><td style="padding:6px 0;">${priority}</td></tr>
+      </table>
+      ${link ? `<p><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0c8de6;color:#fff;text-decoration:none;border-radius:6px;">Open in CRM</a></p>` : ''}
+      <p style="font-size: 13px; color: #555;">${appName}</p>
+    </div>
+  `;
+
+  if (!cfg.configured) {
+    console.log('[CRM email] Assignment email not sent (SMTP not configured)', { to, ticketNumber });
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.auth,
+    tls: ignoreTlsErrors ? { rejectUnauthorized: false } : undefined,
+  });
+
+  try {
+    await transporter.sendMail({
+      from: cfg.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.log('[CRM email] Assignment email sent', { to, ticketNumber, at: new Date().toISOString() });
+    return { sent: true };
+  } catch (err) {
+    console.error('[CRM email] Assignment email failed', { to, ticketNumber, error: err?.message });
+    return { sent: false, reason: 'send_failed', error: err?.message };
+  }
+}
+
+/**
  * Send a reminder/notification email to an employee.
  * Used for SIM reminders, ticket assignments, and other in-app reminder tasks.
  */

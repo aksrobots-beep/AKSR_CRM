@@ -4,7 +4,7 @@ import { findAll, findById, findOne, findWhere, insert, update, remove } from '.
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
 import { createNotification } from './notifications.js';
-import { sendReminderEmail } from '../services/email.js';
+import { sendReminderEmail, sendAssignmentEmail } from '../services/email.js';
 
 const router = Router();
 
@@ -187,6 +187,20 @@ router.post('/', async (req, res) => {
         type: 'info',
         link: '/service',
       });
+      if (assignee?.email) {
+        try {
+          await sendAssignmentEmail({
+            to: assignee.email,
+            assigneeName: assignee.name,
+            ticketNumber: ticket.ticket_number,
+            ticketTitle: ticket.title,
+            priority: ticket.priority || 'medium',
+            link: `${baseUrl()}/service`,
+          });
+        } catch (e) {
+          console.warn('[tickets] Assignment email failed', e?.message || e);
+        }
+      }
     }
     res.status(201).json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
@@ -287,6 +301,20 @@ router.put('/:id', async (req, res) => {
         type: 'info',
         link: '/service',
       });
+      if (assignee?.email) {
+        try {
+          await sendAssignmentEmail({
+            to: assignee.email,
+            assigneeName: assignee.name,
+            ticketNumber: ticket.ticket_number,
+            ticketTitle: ticket.title,
+            priority: ticket.priority || 'medium',
+            link: `${baseUrl()}/service`,
+          });
+        } catch (e) {
+          console.warn('[tickets] Assignment email failed', e?.message || e);
+        }
+      }
     }
     res.json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
@@ -340,6 +368,20 @@ router.patch('/:id/assign', async (req, res) => {
         type: 'info',
         link: '/service',
       });
+      if (assignee?.email) {
+        try {
+          await sendAssignmentEmail({
+            to: assignee.email,
+            assigneeName: assignee.name,
+            ticketNumber: ticket.ticket_number,
+            ticketTitle: ticket.title,
+            priority: ticket.priority || 'medium',
+            link: `${baseUrl()}/service`,
+          });
+        } catch (e) {
+          console.warn('[tickets] Assignment email failed', e?.message || e);
+        }
+      }
     }
     res.json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {

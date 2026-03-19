@@ -335,9 +335,14 @@ export function ServiceTickets() {
       />
 
       {isTechnician && (
-        <div className="mx-6 mt-4 p-3 bg-primary-50 border border-primary-200 rounded-lg flex items-center gap-2">
-          <UserCheck className="w-5 h-5 text-primary-600" />
-          <span className="text-sm text-primary-700">Showing tickets assigned to you</span>
+        <div className="mx-6 mt-4 p-3 bg-primary-50 border border-primary-200 rounded-lg flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <UserCheck className="w-5 h-5 text-primary-600" />
+            <span className="text-sm text-primary-700">Showing tickets assigned to you</span>
+          </div>
+          <button type="button" onClick={() => setShowAddModal(true)} className="btn-primary text-sm inline-flex items-center gap-1.5">
+            <span>New Ticket</span>
+          </button>
         </div>
       )}
 
