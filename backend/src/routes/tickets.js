@@ -4,28 +4,142 @@ import { findAll, findById, findOne, findWhere, insert, update, remove } from '.
 import { validateDate } from '../utils/validateDate.js';
 import { send500 } from '../utils/errorResponse.js';
 import { createNotification } from './notifications.js';
-import { sendReminderEmail, sendAssignmentEmail } from '../services/email.js';
+import { sendReminderEmail, sendAssignmentEmail, sendBillingRequestEmail } from '../services/email.js';
 
 const router = Router();
 
 const baseUrl = () => process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173';
 
 function getAccountsEmails() {
-  const raw = process.env.ACCOUNTS_TEAM_EMAILS || process.env.ACCOUNTS_EMAILS || process.env.ACCOUNTS_EMAIL || '';
-  return raw
+  const raw =
+    process.env.ACCOUNTS_TEAM_EMAILS ||
+    process.env.ACCOUNTS_EMAILS ||
+    process.env.ACCOUNTS_EMAIL ||
+    'wanz@aksuccess.com.my,it@aksuccess.com.my,andy@aksuccess.com.my,mugun@aksuccess.com.my';
+  const all = raw
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+  return {
+    all,
+    to: all[0] || '',
+    cc: all.slice(1),
+  };
+}
+
+const TICKET_FULL_EDIT_ROLES = new Set(['ceo', 'admin', 'service_manager', 'finance']);
+
+/** Managers/finance edit any ticket; technicians only if assigned or creator; other roles may edit any. */
+function userCanMutateTicket(user, ticket) {
+  if (!user?.id || !ticket) return false;
+  if (TICKET_FULL_EDIT_ROLES.has(user.role)) return true;
+  if (ticket.assigned_to === user.id || ticket.created_by === user.id) return true;
+  if (user.role === 'technician') return false;
+  return true;
+}
+
+function parseStoredSupportAttachments(raw) {
+  if (raw == null || raw === '') return [];
+  try {
+    const v = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+const SUPPORT_ATTACH_MAX_FILES = 8;
+const SUPPORT_ATTACH_MAX_BYTES = 4 * 1024 * 1024;
+
+function normalizeIncomingSupportAttachmentsArray(raw, userId) {
+  let arr = raw;
+  if (typeof raw === 'string') {
+    try {
+      arr = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (const item of arr.slice(0, SUPPORT_ATTACH_MAX_FILES)) {
+    if (!item || !item.filename || !item.data) continue;
+    const fn = String(item.filename)
+      .replace(/[<>:"|?*\\]/g, '_')
+      .slice(0, 255);
+    if (!fn) continue;
+    let buf;
+    try {
+      buf = Buffer.from(String(item.data), 'base64');
+    } catch {
+      continue;
+    }
+    if (buf.length > SUPPORT_ATTACH_MAX_BYTES) continue;
+    out.push({
+      id:
+        item.id && typeof item.id === 'string' && item.id.length > 0 && item.id.length < 45
+          ? item.id
+          : uuidv4(),
+      filename: fn,
+      contentType: String(item.contentType || 'application/octet-stream').slice(0, 120),
+      data: buf.toString('base64'),
+      uploaded_at: item.uploaded_at || new Date().toISOString(),
+      uploaded_by: item.uploaded_by || userId,
+    });
+  }
+  return out;
+}
+
+async function notifyTicketStakeholdersExcludingActor(ticket, actorId, title, message, type = 'info') {
+  const ids = new Set();
+  if (ticket.assigned_to && ticket.assigned_to !== actorId) ids.add(ticket.assigned_to);
+  if (ticket.created_by && ticket.created_by !== actorId) ids.add(ticket.created_by);
+  for (const uid of ids) {
+    await createNotification(uid, { title, message, type, link: '/service' });
+  }
+}
+
+function valuesEqualTicketField(a, b) {
+  if (a === b) return true;
+  if (a == null && b == null) return true;
+  return String(a ?? '') === String(b ?? '');
+}
+
+function ticketHasNonAssignmentChanges(currentTicket, updates) {
+  const keys = [
+    'title', 'description', 'priority', 'status', 'client_id', 'equipment_id',
+    'due_date', 'next_action_date', 'next_action_item', 'action_taken',
+    'estimated_hours', 'actual_hours', 'labor_cost', 'parts_cost', 'is_billable',
+  ];
+  for (const k of keys) {
+    if (updates[k] === undefined) continue;
+    if (!valuesEqualTicketField(currentTicket[k], updates[k])) return true;
+  }
+  if (updates.tags !== undefined) {
+    const cur = typeof currentTicket.tags === 'string' ? currentTicket.tags : JSON.stringify(currentTicket.tags ?? []);
+    const nxt = Array.isArray(updates.tags) ? JSON.stringify(updates.tags) : String(updates.tags ?? '');
+    if (cur !== nxt) return true;
+  }
+  if (updates.support_attachments !== undefined) return true;
+  return false;
 }
 
 async function requestBillingByEmail({ ticket, actorUserId, previousStatus }) {
-  const to = getAccountsEmails();
-  if (!to.length) {
+  const recipients = getAccountsEmails();
+  if (!recipients.to) {
     console.log('[billing request] Skipped: ACCOUNTS_TEAM_EMAILS (or ACCOUNTS_EMAILS) not set in env', { ticketId: ticket?.id });
     return { sent: false, reason: 'no_accounts_emails' };
   }
 
-  console.log('[billing request] Sending to', to.join(', '), 'for ticket', ticket?.ticket_number || ticket?.id, 'previousStatus=', previousStatus);
+  console.log(
+    '[billing request] Sending to',
+    recipients.to,
+    recipients.cc.length ? `(cc: ${recipients.cc.join(', ')})` : '',
+    'for ticket',
+    ticket?.ticket_number || ticket?.id,
+    'previousStatus=',
+    previousStatus
+  );
 
   const link = `${baseUrl()}/service`;
   const title = `Billing request: ${ticket?.ticket_number || ticket?.id || 'Ticket'}`;
@@ -38,7 +152,8 @@ async function requestBillingByEmail({ ticket, actorUserId, previousStatus }) {
   ].filter(Boolean).join('\n');
 
   const result = await sendReminderEmail({
-    to: to.join(','),
+    to: recipients.to,
+    cc: recipients.cc.join(','),
     name: 'Accounts Team',
     title,
     message,
@@ -46,9 +161,19 @@ async function requestBillingByEmail({ ticket, actorUserId, previousStatus }) {
   });
 
   if (!result.sent) {
-    console.log('[billing request] Email not sent', { to, ticketId: ticket?.id, reason: result.reason || 'unknown' });
+    console.log('[billing request] Email not sent', {
+      to: recipients.to,
+      cc: recipients.cc,
+      ticketId: ticket?.id,
+      reason: result.reason || 'unknown',
+    });
   } else {
-    console.log('[billing request] Email sent', { to, ticketId: ticket?.id, at: new Date().toISOString() });
+    console.log('[billing request] Email sent', {
+      to: recipients.to,
+      cc: recipients.cc,
+      ticketId: ticket?.id,
+      at: new Date().toISOString(),
+    });
   }
 
   return result;
@@ -84,7 +209,7 @@ router.get('/', async (req, res) => {
     if (priority) tickets = tickets.filter(t => t.priority === priority);
     if (assigned_to) tickets = tickets.filter(t => t.assigned_to === assigned_to);
     if (client_id) tickets = tickets.filter(t => t.client_id === client_id);
-    const result = tickets.map(ticket => {
+    const result = tickets.map((ticket) => {
       const client = clientsData.find(c => c.id === ticket.client_id);
       const equipment = ticket.equipment_id ? equipmentData.find(e => e.id === ticket.equipment_id) : null;
       const assignee = ticket.assigned_to ? usersData.find(u => u.id === ticket.assigned_to) : null;
@@ -102,7 +227,7 @@ router.get('/:id', async (req, res) => {
   try {
     const ticket = await findById('tickets', req.params.id);
     if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && ticket.assigned_to !== req.user.id && ticket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (!userCanMutateTicket(req.user, ticket)) return res.status(403).json({ error: 'Access denied' });
     const [c, e, a] = await Promise.all([
       findById('clients', ticket.client_id),
       ticket.equipment_id ? findById('equipment', ticket.equipment_id) : null,
@@ -120,14 +245,15 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// Get all technicians (for assignment dropdown)
+// Active CRM users for ticket assignment (any role; path kept for API compatibility)
 router.get('/meta/technicians', async (req, res) => {
   try {
     const all = await findAll('users');
-    const technicians = all
-      .filter(u => ['technician', 'service_manager'].includes(u.role) && (u.is_active === 1 || u.is_active === true))
-      .map(u => ({ id: u.id, name: u.name, role: u.role }));
-    res.json(technicians);
+    const assignees = all
+      .filter((u) => u.is_active === 1 || u.is_active === true)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' }))
+      .map((u) => ({ id: u.id, name: u.name, role: u.role }));
+    res.json(assignees);
   } catch (error) {
     console.error('Get technicians error:', error);
     send500(res, 'Failed to get technicians', error);
@@ -137,7 +263,22 @@ router.get('/meta/technicians', async (req, res) => {
 // Create ticket
 router.post('/', async (req, res) => {
   try {
-    const { title, description, priority, client_id, equipment_id, assigned_to, due_date, next_action_date, next_action_item, action_taken, estimated_hours, tags, is_billable: isBillableRaw } = req.body;
+    const {
+      title,
+      description,
+      priority,
+      client_id,
+      equipment_id,
+      assigned_to,
+      due_date,
+      next_action_date,
+      next_action_item,
+      action_taken,
+      estimated_hours,
+      tags,
+      is_billable: isBillableRaw,
+      support_attachments: supportAttachmentsRaw,
+    } = req.body;
     if (!title || !client_id) return res.status(400).json({ error: 'Title and client are required' });
     const is_billable = (isBillableRaw === false || isBillableRaw === 'false' || isBillableRaw === 0) ? 0 : 1;
     // Technicians can create tickets; if they don't assign to anyone, assign to themselves so the ticket appears in their list
@@ -181,7 +322,22 @@ router.post('/', async (req, res) => {
       created_by: req.user.id,
       updated_by: req.user.id,
     };
-    await insert('tickets', ticket);
+    if (supportAttachmentsRaw !== undefined) {
+      const arr = normalizeIncomingSupportAttachmentsArray(supportAttachmentsRaw, req.user.id);
+      ticket.support_attachments = arr.length ? JSON.stringify(arr) : null;
+    }
+    try {
+      await insert('tickets', ticket);
+    } catch (insertErr) {
+      const msg = (insertErr?.message || '').toString();
+      const unknownCol = msg.match(/Unknown column '([^']+)'/);
+      if (unknownCol?.[1] === 'support_attachments') {
+        delete ticket.support_attachments;
+        await insert('tickets', ticket);
+      } else {
+        throw insertErr;
+      }
+    }
     const assignee = ticket.assigned_to ? await findOne('users', u => u.id === ticket.assigned_to) : null;
     if (ticket.assigned_to) {
       await createNotification(ticket.assigned_to, {
@@ -203,6 +359,18 @@ router.post('/', async (req, res) => {
         } catch (e) {
           console.warn('[tickets] Assignment email failed', e?.message || e);
         }
+      }
+    } else {
+      const users = await findAll('users');
+      for (const u of users) {
+        if (!(u.is_active === 1 || u.is_active === true)) continue;
+        if (!['service_manager', 'admin', 'ceo'].includes(u.role)) continue;
+        await createNotification(u.id, {
+          title: 'New unassigned service ticket',
+          message: `${ticket.title} (${ticket.ticket_number})`,
+          type: 'warning',
+          link: '/service',
+        });
       }
     }
     res.status(201).json({ ...ticket, assigned_to_name: assignee?.name });
@@ -226,13 +394,19 @@ router.put('/:id', async (req, res) => {
     const now = new Date().toISOString();
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id && currentTicket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (!userCanMutateTicket(req.user, currentTicket)) return res.status(403).json({ error: 'Access denied' });
 
     const updates = { updated_at: now, updated_by: req.user.id };
     for (const key of TICKET_UPDATE_KEYS) {
       if (key === 'updated_at' || key === 'updated_by') continue;
       if (req.body[key] !== undefined) updates[key] = req.body[key];
     }
+    if (req.body.support_attachments !== undefined) {
+      const arr = normalizeIncomingSupportAttachmentsArray(req.body.support_attachments, req.user.id);
+      updates.support_attachments = arr.length ? JSON.stringify(arr) : null;
+    }
+
+    const shouldNotifyOtherStakeholders = ticketHasNonAssignmentChanges(currentTicket, updates);
 
     if (updates.due_date !== undefined) {
       const r = validateDate(updates.due_date, { required: false, fieldName: 'Due date' });
@@ -319,6 +493,9 @@ router.put('/:id', async (req, res) => {
         }
       }
     }
+    if (shouldNotifyOtherStakeholders) {
+      await notifyTicketStakeholdersExcludingActor(ticket, req.user.id, 'Service ticket updated', `${ticket.ticket_number}: ${ticket.title}`);
+    }
     res.json({ ...ticket, assigned_to_name: assignee?.name });
   } catch (error) {
     console.error('Update ticket error:', error);
@@ -395,16 +572,31 @@ router.patch('/:id/assign', async (req, res) => {
 // Update ticket status only
 router.patch('/:id/status', async (req, res) => {
   try {
-    const { status } = req.body;
+    const { status, billing_items, billing_notes, attachments } = req.body;
     if (!status) return res.status(400).json({ error: 'Status is required' });
     const now = toMySQLDatetime(new Date());
     const currentTicket = await findById('tickets', req.params.id);
     if (!currentTicket) return res.status(404).json({ error: 'Ticket not found' });
-    if (req.user.role === 'technician' && currentTicket.assigned_to !== req.user.id && currentTicket.created_by !== req.user.id) return res.status(403).json({ error: 'Access denied' });
+    if (!userCanMutateTicket(req.user, currentTicket)) return res.status(403).json({ error: 'Access denied' });
 
     const updates = { status, updated_at: now, updated_by: req.user.id };
     if (status === 'resolved') updates.resolved_at = now;
     if (status === 'closed') updates.closed_at = now;
+
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      const existing = parseStoredSupportAttachments(currentTicket.support_attachments);
+      const added = normalizeIncomingSupportAttachmentsArray(attachments, req.user.id);
+      const merged = [...existing, ...added].slice(0, 12);
+      updates.support_attachments = JSON.stringify(merged);
+    }
+
+    if (billing_items && Array.isArray(billing_items)) {
+      updates.billing_items = JSON.stringify(billing_items);
+    }
+    if (billing_notes !== undefined) {
+      updates.billing_notes = billing_notes || null;
+    }
+
     try {
       await insert('audit_logs', {
         id: uuidv4(),
@@ -426,11 +618,45 @@ router.patch('/:id/status', async (req, res) => {
       (status === 'resolved' || status === 'closed') &&
       status !== currentTicket.status
     ) {
-      await requestBillingByEmail({ ticket, actorUserId: req.user?.id, previousStatus: currentTicket.status });
+      const recipients = getAccountsEmails();
+      if (recipients.to && billing_items && billing_items.length) {
+        const actor = await findById('users', req.user.id);
+        const client = currentTicket.client_id ? await findById('clients', currentTicket.client_id) : null;
+        try {
+          await sendBillingRequestEmail({
+            to: recipients.to,
+            cc: recipients.cc.join(','),
+            ticketNumber: ticket.ticket_number || currentTicket.ticket_number,
+            ticketTitle: ticket.title || currentTicket.title,
+            clientName: client?.company_name || client?.name || '',
+            priority: ticket.priority || currentTicket.priority,
+            resolvedBy: actor?.name || actor?.email || req.user.id,
+            billingItems: billing_items,
+            billingNotes: billing_notes || '',
+            link: `${baseUrl()}/service`,
+            attachments: Array.isArray(attachments) ? attachments : [],
+          });
+        } catch (emailErr) {
+          console.error('[billing request] Email send failed', emailErr?.message || emailErr);
+        }
+      } else if (!recipients.to) {
+        console.log('[billing request] Skipped: no accounts emails configured');
+      } else {
+        await requestBillingByEmail({ ticket, actorUserId: req.user?.id, previousStatus: currentTicket.status });
+      }
     } else if (currentTicket.is_billable !== 1 && (status === 'resolved' || status === 'closed')) {
       console.log('[billing request] Skipped: ticket not billable (is_billable=' + currentTicket.is_billable + ')', { ticketId: req.params.id });
     } else if (status === currentTicket.status) {
       console.log('[billing request] Skipped: status unchanged', { ticketId: req.params.id, status });
+    }
+
+    if (status !== currentTicket.status) {
+      await notifyTicketStakeholdersExcludingActor(
+        { ...currentTicket, assigned_to: ticket.assigned_to, created_by: ticket.created_by },
+        req.user.id,
+        'Service ticket status updated',
+        `${ticket.ticket_number || currentTicket.ticket_number}: ${currentTicket.status} → ${status}`
+      );
     }
 
     res.json(ticket);

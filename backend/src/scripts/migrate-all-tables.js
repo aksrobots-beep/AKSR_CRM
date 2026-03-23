@@ -258,6 +258,37 @@ async function main() {
         updated_by VARCHAR(36)
       )`,
     },
+    {
+      name: 'client_site_visits',
+      sql: `CREATE TABLE IF NOT EXISTS client_site_visits (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        client_id VARCHAR(36) NOT NULL,
+        ticket_id VARCHAR(36) NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'open',
+        arrived_at DATETIME NOT NULL,
+        departed_at DATETIME NULL,
+        arrival_lat DECIMAL(10,8) NOT NULL,
+        arrival_lng DECIMAL(11,8) NOT NULL,
+        departure_lat DECIMAL(10,8) NULL,
+        departure_lng DECIMAL(11,8) NULL,
+        arrival_accuracy_m DECIMAL(10,2) NULL,
+        departure_accuracy_m DECIMAL(10,2) NULL,
+        checkout_outside_radius TINYINT DEFAULT 0,
+        ad_hoc_site TINYINT NOT NULL DEFAULT 0,
+        ad_hoc_center_lat DECIMAL(10,8) NULL,
+        ad_hoc_center_lng DECIMAL(11,8) NULL,
+        field_report_zip VARCHAR(512) NULL,
+        field_report_manifest LONGTEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE SET NULL,
+        INDEX idx_visits_user_client_status (user_id, client_id, status),
+        INDEX idx_visits_client_arrived (client_id, arrived_at)
+      )`,
+    },
   ];
 
   try {
@@ -276,6 +307,9 @@ async function main() {
       { table: 'tickets', column: 'resolved_at', sql: 'ALTER TABLE tickets ADD COLUMN resolved_at DATETIME NULL' },
       { table: 'tickets', column: 'closed_at', sql: 'ALTER TABLE tickets ADD COLUMN closed_at DATETIME NULL' },
       { table: 'tickets', column: 'total_cost', sql: 'ALTER TABLE tickets ADD COLUMN total_cost DECIMAL(12,2) DEFAULT 0' },
+      { table: 'tickets', column: 'billing_items', sql: 'ALTER TABLE tickets ADD COLUMN billing_items JSON NULL' },
+      { table: 'tickets', column: 'billing_notes', sql: 'ALTER TABLE tickets ADD COLUMN billing_notes TEXT NULL' },
+      { table: 'tickets', column: 'support_attachments', sql: 'ALTER TABLE tickets ADD COLUMN support_attachments LONGTEXT NULL' },
       { table: 'equipment', column: 'sim_number', sql: 'ALTER TABLE equipment ADD COLUMN sim_number VARCHAR(100) NULL' },
       { table: 'equipment', column: 'sim_carrier', sql: 'ALTER TABLE equipment ADD COLUMN sim_carrier VARCHAR(100) NULL' },
       { table: 'equipment', column: 'sim_phone_number', sql: 'ALTER TABLE equipment ADD COLUMN sim_phone_number VARCHAR(50) NULL' },
@@ -287,6 +321,36 @@ async function main() {
       { table: 'inventory', column: 'track_serial_numbers', sql: 'ALTER TABLE inventory ADD COLUMN track_serial_numbers TINYINT DEFAULT 0' },
       { table: 'clients', column: 'client_code', sql: 'ALTER TABLE clients ADD COLUMN client_code VARCHAR(50) DEFAULT NULL' },
       { table: 'clients', column: 'old_company_name', sql: 'ALTER TABLE clients ADD COLUMN old_company_name VARCHAR(255) DEFAULT NULL' },
+      { table: 'clients', column: 'latitude', sql: 'ALTER TABLE clients ADD COLUMN latitude DECIMAL(10,8) NULL' },
+      { table: 'clients', column: 'longitude', sql: 'ALTER TABLE clients ADD COLUMN longitude DECIMAL(11,8) NULL' },
+      { table: 'clients', column: 'geofence_radius_m', sql: 'ALTER TABLE clients ADD COLUMN geofence_radius_m INT NULL' },
+      { table: 'clients', column: 'geocoded_at', sql: 'ALTER TABLE clients ADD COLUMN geocoded_at DATETIME NULL' },
+      { table: 'clients', column: 'geocode_source', sql: 'ALTER TABLE clients ADD COLUMN geocode_source VARCHAR(50) NULL' },
+      {
+        table: 'client_site_visits',
+        column: 'field_report_zip',
+        sql: 'ALTER TABLE client_site_visits ADD COLUMN field_report_zip VARCHAR(512) NULL',
+      },
+      {
+        table: 'client_site_visits',
+        column: 'field_report_manifest',
+        sql: 'ALTER TABLE client_site_visits ADD COLUMN field_report_manifest LONGTEXT NULL',
+      },
+      {
+        table: 'client_site_visits',
+        column: 'ad_hoc_site',
+        sql: 'ALTER TABLE client_site_visits ADD COLUMN ad_hoc_site TINYINT NOT NULL DEFAULT 0',
+      },
+      {
+        table: 'client_site_visits',
+        column: 'ad_hoc_center_lat',
+        sql: 'ALTER TABLE client_site_visits ADD COLUMN ad_hoc_center_lat DECIMAL(10,8) NULL',
+      },
+      {
+        table: 'client_site_visits',
+        column: 'ad_hoc_center_lng',
+        sql: 'ALTER TABLE client_site_visits ADD COLUMN ad_hoc_center_lng DECIMAL(11,8) NULL',
+      },
     ];
 
     console.log('\n--- Column migrations ---\n');

@@ -19,6 +19,12 @@ export async function getConnection() {
       waitForConnections: true,
       connectionLimit: limit,
       queueLimit: 0,
+      /**
+       * App writes DATETIME as UTC wall clock (toISOString().slice(0,19)).
+       * Default mysql2 "local" parsing treats those digits as server TZ → wrong instant (e.g. +8h skew in MY).
+       * Use Z so JS Date matches stored UTC instant; serializeVisitRow still emits ISO Z for the client.
+       */
+      timezone: process.env.MYSQL_SESSION_TIMEZONE || 'Z',
     });
   }
   return pool;

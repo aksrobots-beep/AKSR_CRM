@@ -27,24 +27,24 @@
     "migrate-password-reset": "node src/scripts/migrate-password-reset.js",
     "migrate-notifications-table": "node src/scripts/migrate-notifications-table.js",
     "migrate-all": "node src/scripts/migrate-all-tables.js",
+    "deploy:vercel": "vercel deploy --prod --yes --cwd ..",
     "migrate-old-company-name": "node src/scripts/migrate-old-company-name.js",
     "migrate-phone": "node src/scripts/add-phone-column.js",
     "test-api": "node src/scripts/test-and-seed-api.js",
     "seed-api": "node src/scripts/test-and-seed-api.js --seed"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "lowdb": "^7.0.1",
+    "multer": "^2.1.1",
     "mysql2": "^3.6.5",
     "nodemailer": "^7.0.13",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5"
-  },
-  "devDependencies": {
-    "archiver": "^7.0.1"
   }
 }

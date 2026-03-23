@@ -2,8 +2,23 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { findAll, findById, insert, update, remove, query } from '../db/index.js';
 import { send500 } from '../utils/errorResponse.js';
+import { userCanAccessClient } from '../utils/visitAccess.js';
+import { effectiveRadiusM } from '../utils/geo.js';
 
 const router = Router();
+
+const CLIENT_UPDATE_KEYS = new Set([
+  'name', 'company_name', 'old_company_name', 'client_code', 'email', 'phone', 'address', 'city', 'state', 'country', 'postal_code', 'industry', 'assigned_to', 'notes', 'status',
+  'latitude', 'longitude', 'geofence_radius_m', 'geocoded_at', 'geocode_source',
+]);
+
+function pickClientUpdates(body) {
+  const out = {};
+  for (const k of CLIENT_UPDATE_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(body, k)) out[k] = body[k];
+  }
+  return out;
+}
 
 /** Check for duplicate client_code, email, or phone. Returns { error: string } or null. */
 async function checkClientUniqueness({ client_code, email, phone, excludeId = null }) {
@@ -52,6 +67,76 @@ function calcMonthlyRevenue(equipmentList) {
     .filter(e => e.ownership_type === 'rental' && e.rental_amount > 0)
     .reduce((sum, e) => sum + Number(e.rental_amount), 0);
 }
+
+// Geocode address (server-side; optional Google key or OSM Nominatim)
+router.post('/geocode', async (req, res) => {
+  try {
+    if (!req.user?.id) return res.status(401).json({ error: 'Authentication required' });
+    const { address, city, state, country, postal_code } = req.body || {};
+    const parts = [address, city, state, postal_code, country].filter((p) => p != null && String(p).trim() !== '');
+    const q = parts.join(', ').trim();
+    if (!q) return res.status(400).json({ error: 'Provide address, city, state, or country to geocode' });
+
+    const googleKey = (process.env.GOOGLE_MAPS_GEOCODING_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '').trim();
+    if (googleKey) {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(q)}&key=${googleKey}`;
+      const r = await fetch(url);
+      const j = await r.json();
+      if (j.status !== 'OK' || !j.results?.[0]?.geometry?.location) {
+        return res.status(400).json({ error: j.error_message || j.status || 'Geocoding failed' });
+      }
+      const loc = j.results[0].geometry.location;
+      return res.json({
+        lat: loc.lat,
+        lng: loc.lng,
+        display_name: j.results[0].formatted_address,
+        source: 'google',
+      });
+    }
+
+    const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
+    const r = await fetch(nomUrl, {
+      headers: { 'User-Agent': 'AKSuccessCRM-Server/1.0 (client-geocode)' },
+    });
+    const arr = await r.json();
+    if (!Array.isArray(arr) || !arr[0]) {
+      return res.status(400).json({ error: 'No results from geocoder' });
+    }
+    const hit = arr[0];
+    return res.json({
+      lat: parseFloat(hit.lat),
+      lng: parseFloat(hit.lon),
+      display_name: hit.display_name,
+      source: 'nominatim',
+    });
+  } catch (error) {
+    send500(res, 'Geocoding failed', error);
+  }
+});
+
+// Site anchor for visit / geofence apps (restricted)
+router.get('/:id/site', async (req, res) => {
+  try {
+    const client = await findById('clients', req.params.id);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    const allowed = await userCanAccessClient(req.user, req.params.id);
+    if (!allowed) return res.status(403).json({ error: 'Access denied' });
+    const lat = client.latitude != null ? Number(client.latitude) : null;
+    const lng = client.longitude != null ? Number(client.longitude) : null;
+    res.json({
+      client_id: client.id,
+      company_name: client.company_name,
+      name: client.name,
+      latitude: lat,
+      longitude: lng,
+      geofence_radius_m: client.geofence_radius_m != null ? Number(client.geofence_radius_m) : null,
+      effective_radius_m: effectiveRadiusM(client),
+      site_configured: lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng),
+    });
+  } catch (error) {
+    send500(res, 'Failed to get client site', error);
+  }
+});
 
 // Get all clients
 router.get('/', async (req, res) => {
@@ -106,13 +191,20 @@ function toMySQLDatetime(d) {
 router.post('/', async (req, res) => {
   try {
     if (!req.user?.id) return res.status(401).json({ error: 'Authentication required' });
-    const { name, company_name, old_company_name, client_code, email, phone, address, city, state, country, postal_code, industry, assigned_to, notes } = req.body;
+    const {
+      name, company_name, old_company_name, client_code, email, phone, address, city, state, country, postal_code, industry, assigned_to, notes,
+      latitude, longitude, geofence_radius_m, geocode_source: geocodeSourceBody,
+    } = req.body;
     if (!name || !company_name) return res.status(400).json({ error: 'Name and company name are required' });
 
     const uniqueness = await checkClientUniqueness({ client_code, email, phone });
     if (uniqueness) return res.status(400).json({ error: uniqueness.error });
 
     const now = toMySQLDatetime(new Date());
+    const latN = latitude != null && latitude !== '' ? parseFloat(latitude) : null;
+    const lngN = longitude != null && longitude !== '' ? parseFloat(longitude) : null;
+    const radN = geofence_radius_m != null && geofence_radius_m !== '' ? parseInt(geofence_radius_m, 10) : null;
+    const hasCoords = latN != null && lngN != null && Number.isFinite(latN) && Number.isFinite(lngN);
     const client = {
       id: uuidv4(),
       client_code: client_code != null ? String(client_code).trim() : null,
@@ -129,6 +221,13 @@ router.post('/', async (req, res) => {
       industry: industry != null ? String(industry).trim() : '',
       assigned_to: assigned_to || null,
       notes: notes != null ? String(notes).trim() : '',
+      latitude: hasCoords ? latN : null,
+      longitude: hasCoords ? lngN : null,
+      geofence_radius_m: radN != null && Number.isFinite(radN) && radN > 0 ? radN : null,
+      geocoded_at: hasCoords ? now : null,
+      geocode_source: hasCoords
+        ? (geocodeSourceBody != null && String(geocodeSourceBody).trim() !== '' ? String(geocodeSourceBody).trim() : 'manual')
+        : null,
       total_revenue: 0,
       status: 'active',
       is_active: 1,
@@ -157,9 +256,26 @@ router.put('/:id', async (req, res) => {
     if (uniqueness) return res.status(400).json({ error: uniqueness.error });
 
     const now = new Date().toISOString();
-    const updates = { ...req.body, updated_at: now, updated_by: req.user.id };
+    const updates = pickClientUpdates(req.body);
+    updates.updated_at = now;
+    updates.updated_by = req.user.id;
     if (updates.old_company_name !== undefined) {
       updates.old_company_name = updates.old_company_name != null && String(updates.old_company_name).trim() !== '' ? String(updates.old_company_name).trim() : null;
+    }
+    if (updates.latitude !== undefined || updates.longitude !== undefined) {
+      const latN = updates.latitude != null && updates.latitude !== '' ? parseFloat(updates.latitude) : null;
+      const lngN = updates.longitude != null && updates.longitude !== '' ? parseFloat(updates.longitude) : null;
+      const hasCoords = latN != null && lngN != null && Number.isFinite(latN) && Number.isFinite(lngN);
+      updates.latitude = hasCoords ? latN : null;
+      updates.longitude = hasCoords ? lngN : null;
+      if (hasCoords) {
+        updates.geocoded_at = toMySQLDatetime(new Date());
+        if (!updates.geocode_source) updates.geocode_source = 'manual';
+      }
+    }
+    if (updates.geofence_radius_m !== undefined) {
+      const r = updates.geofence_radius_m != null && updates.geofence_radius_m !== '' ? parseInt(updates.geofence_radius_m, 10) : null;
+      updates.geofence_radius_m = r != null && Number.isFinite(r) && r > 0 ? r : null;
     }
     const client = await update('clients', req.params.id, updates);
     if (!client) return res.status(404).json({ error: 'Client not found' });

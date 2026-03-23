@@ -162,10 +162,147 @@ export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, tick
 }
 
 /**
+ * Send a billing request email with itemized billing details to the accounts team.
+ */
+export async function sendBillingRequestEmail({
+  to,
+  cc,
+  ticketNumber,
+  ticketTitle,
+  clientName,
+  priority,
+  resolvedBy,
+  billingItems = [],
+  billingNotes,
+  link,
+  attachments = [],
+}) {
+  const cfg = getSmtpConfig();
+  const appName = 'AK Success CRM';
+  const subject = `Billing Request: ${ticketNumber || 'Service Ticket'} - ${ticketTitle || ''}`.trim();
+
+  const grandTotal = billingItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0);
+
+  const itemsText = billingItems.map((item, i) =>
+    `${i + 1}. ${item.description || '—'}  |  Qty: ${item.quantity || 0}  |  Unit: RM${(item.unit_price || 0).toFixed(2)}  |  Total: RM${((item.quantity || 0) * (item.unit_price || 0)).toFixed(2)}`
+  ).join('\n');
+
+  const text = [
+    'Billing Request',
+    '',
+    `Ticket: ${ticketNumber || '—'}`,
+    `Title: ${ticketTitle || '—'}`,
+    clientName ? `Client: ${clientName}` : '',
+    `Priority: ${priority || '—'}`,
+    resolvedBy ? `Resolved by: ${resolvedBy}` : '',
+    '',
+    'Billing Items:',
+    itemsText || '(none)',
+    '',
+    `Grand Total: RM${grandTotal.toFixed(2)}`,
+    billingNotes ? `\nNotes: ${billingNotes}` : '',
+    link ? `\nView in CRM: ${link}` : '',
+    '',
+    appName,
+  ].filter(Boolean).join('\n');
+
+  const itemsHtml = billingItems.map((item) => {
+    const lineTotal = (item.quantity || 0) * (item.unit_price || 0);
+    return `<tr>
+      <td style="padding:8px 12px; border:1px solid #ddd;">${item.description || '—'}</td>
+      <td style="padding:8px 12px; border:1px solid #ddd; text-align:center;">${item.quantity || 0}</td>
+      <td style="padding:8px 12px; border:1px solid #ddd; text-align:right;">RM${(item.unit_price || 0).toFixed(2)}</td>
+      <td style="padding:8px 12px; border:1px solid #ddd; text-align:right;">RM${lineTotal.toFixed(2)}</td>
+    </tr>`;
+  }).join('');
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; line-height:1.5; color:#222;">
+      <h2 style="color:#0c8de6; margin-bottom:4px;">Billing Request</h2>
+      <table style="border-collapse: collapse; margin: 12px 0;">
+        <tr><td style="padding:4px 12px 4px 0; color:#555;">Ticket</td><td style="padding:4px 0;"><strong>${ticketNumber || '—'}</strong></td></tr>
+        <tr><td style="padding:4px 12px 4px 0; color:#555;">Title</td><td style="padding:4px 0;">${ticketTitle || '—'}</td></tr>
+        ${clientName ? `<tr><td style="padding:4px 12px 4px 0; color:#555;">Client</td><td style="padding:4px 0;">${clientName}</td></tr>` : ''}
+        <tr><td style="padding:4px 12px 4px 0; color:#555;">Priority</td><td style="padding:4px 0;">${priority || '—'}</td></tr>
+        ${resolvedBy ? `<tr><td style="padding:4px 12px 4px 0; color:#555;">Resolved by</td><td style="padding:4px 0;">${resolvedBy}</td></tr>` : ''}
+      </table>
+      <h3 style="margin-top:16px;">Billing Items</h3>
+      <table style="border-collapse: collapse; width:100%; margin: 8px 0;">
+        <thead>
+          <tr style="background:#f5f5f5;">
+            <th style="padding:8px 12px; border:1px solid #ddd; text-align:left;">Description</th>
+            <th style="padding:8px 12px; border:1px solid #ddd; text-align:center;">Qty</th>
+            <th style="padding:8px 12px; border:1px solid #ddd; text-align:right;">Unit Price</th>
+            <th style="padding:8px 12px; border:1px solid #ddd; text-align:right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemsHtml || '<tr><td colspan="4" style="padding:8px 12px; border:1px solid #ddd; color:#999;">No items</td></tr>'}
+        </tbody>
+        <tfoot>
+          <tr style="background:#f0f7ff;">
+            <td colspan="3" style="padding:8px 12px; border:1px solid #ddd; text-align:right;"><strong>Grand Total</strong></td>
+            <td style="padding:8px 12px; border:1px solid #ddd; text-align:right;"><strong>RM${grandTotal.toFixed(2)}</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+      ${billingNotes ? `<p style="margin-top:12px;"><strong>Notes:</strong> ${billingNotes.replace(/\n/g, '<br/>')}</p>` : ''}
+      ${attachments.length > 0 ? `<p style="margin-top:12px;"><strong>Attachments:</strong> ${attachments.map(a => a.filename).join(', ')}</p>` : ''}
+      ${link ? `<p style="margin-top:16px;"><a href="${link}" style="display:inline-block;padding:10px 16px;background:#0c8de6;color:#fff;text-decoration:none;border-radius:6px;">Open in CRM</a></p>` : ''}
+      <p style="font-size: 13px; color: #555; margin-top:16px;">${appName}</p>
+    </div>
+  `;
+
+  if (!cfg.configured) {
+    console.log('[CRM email] Billing request email not sent (SMTP not configured)', { to, ticketNumber });
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: cfg.host,
+    port: cfg.port,
+    secure: cfg.secure,
+    auth: cfg.auth,
+    tls: cfg.tls,
+  });
+
+  const mailAttachments = attachments
+    .filter(a => a.filename && a.content)
+    .map(a => ({
+      filename: a.filename,
+      content: Buffer.from(a.content, 'base64'),
+      contentType: a.contentType || 'application/octet-stream',
+    }));
+
+  try {
+    await transporter.sendMail({
+      from: cfg.from,
+      to,
+      cc,
+      subject,
+      text,
+      html,
+      attachments: mailAttachments.length ? mailAttachments : undefined,
+    });
+    console.log('[CRM email] Billing request sent', {
+      to,
+      cc: cc || '',
+      ticketNumber,
+      attachmentCount: mailAttachments.length,
+      at: new Date().toISOString(),
+    });
+    return { sent: true };
+  } catch (err) {
+    console.error('[CRM email] Billing request failed', { to, ticketNumber, error: err?.message });
+    return { sent: false, reason: 'send_failed', error: err?.message };
+  }
+}
+
+/**
  * Send a reminder/notification email to an employee.
  * Used for SIM reminders, ticket assignments, and other in-app reminder tasks.
  */
-export async function sendReminderEmail({ to, name, title, message, link }) {
+export async function sendReminderEmail({ to, cc, name, title, message, link }) {
   const cfg = getSmtpConfig();
   const displayName = name || 'there';
   const appName = 'AK Success CRM';
@@ -207,12 +344,14 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
     await transporter.sendMail({
       from: cfg.from,
       to,
+      cc,
       subject,
       text,
       html,
     });
     console.log('[CRM email] Notification sent', {
       to,
+      cc: cc || '',
       subject,
       at: new Date().toISOString(),
     });
@@ -220,6 +359,7 @@ export async function sendReminderEmail({ to, name, title, message, link }) {
   } catch (err) {
     console.error('[CRM email] Notification send failed', {
       to,
+      cc: cc || '',
       subject,
       error: err?.message || String(err),
       at: new Date().toISOString(),
