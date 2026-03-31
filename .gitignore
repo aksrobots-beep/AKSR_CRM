@@ -24,5 +24,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Uploaded visit field reports (ZIPs)
+backend/uploads/
+
 .vercel
 .env*.local

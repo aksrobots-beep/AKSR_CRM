@@ -15,6 +15,7 @@ import { dashboardRoutes } from './routes/dashboard.js';
 import { supplierRoutes } from './routes/suppliers.js';
 import { reportRoutes } from './routes/reports.js';
 import { notificationRoutes } from './routes/notifications.js';
+import { pushTokenRoutes } from './routes/pushTokens.js';
 import { visitRoutes } from './routes/visits.js';
 import { authenticateToken } from './middleware/auth.js';
 import { toSafeMessage } from './utils/errorResponse.js';
@@ -382,6 +383,7 @@ app.use('/api/dashboard', authenticateToken, dashboardRoutes);
 app.use('/api/suppliers', authenticateToken, supplierRoutes);
 app.use('/api/reports', authenticateToken, reportRoutes);
 app.use('/api/notifications', authenticateToken, notificationRoutes);
+app.use('/api/push-tokens', authenticateToken, pushTokenRoutes);
 app.use('/api/visits', authenticateToken, visitRoutes);
 
 // 404 — if you get JSON here, request reached Node; if you still see "Cannot GET ...", the request never reached Node (proxy/config)

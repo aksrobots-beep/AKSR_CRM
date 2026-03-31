@@ -137,6 +137,20 @@ async function main() {
       )`,
     },
     {
+      name: 'user_push_tokens',
+      sql: `CREATE TABLE IF NOT EXISTS user_push_tokens (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        token VARCHAR(512) NOT NULL,
+        platform VARCHAR(20) DEFAULT 'android',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY uniq_push_token (token),
+        INDEX idx_push_user (user_id)
+      )`,
+    },
+    {
       name: 'leave_requests',
       sql: `CREATE TABLE IF NOT EXISTS leave_requests (
         id VARCHAR(36) PRIMARY KEY,

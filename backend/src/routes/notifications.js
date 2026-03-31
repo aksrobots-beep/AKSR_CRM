@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { query, insert, update } from '../db/index.js';
 import { send500 } from '../utils/errorResponse.js';
 import { sendReminderEmail } from '../services/email.js';
+import { sendPushToUser } from '../services/push.js';
 
 const router = Router();
 
@@ -59,6 +60,17 @@ export async function createNotification(userId, data) {
     }
   } catch (err) {
     console.error('[CRM notification] Email send failed', { userId, title: data.title, error: err?.message || String(err) });
+  }
+
+  try {
+    await sendPushToUser(userId, {
+      title: data.title || 'Notification',
+      body: data.message || '',
+      link: data.link || '',
+      type: data.type || 'info',
+    });
+  } catch (pushErr) {
+    console.error('[CRM notification] Push send failed', { userId, title: data.title, error: pushErr?.message || String(pushErr) });
   }
 
   return id;
