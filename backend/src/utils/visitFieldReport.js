@@ -1,6 +1,7 @@
 import archiver from 'archiver';
 import { createWriteStream, mkdirSync, existsSync, unlinkSync, statSync } from 'fs';
 import path from 'path';
+import os from 'os';
 
 const MAX_FILES = 20;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
@@ -29,9 +30,15 @@ function safeEntryName(original, used) {
 }
 
 export function getVisitFieldReportsRoot() {
-  const root =
-    process.env.VISIT_FIELD_REPORTS_DIR || path.join(process.cwd(), 'uploads', 'visit-field-reports');
-  if (!existsSync(root)) mkdirSync(root, { recursive: true });
+  // In serverless runtimes (e.g. Vercel), app root is often read-only.
+  // Prefer /tmp unless VISIT_FIELD_REPORTS_DIR is explicitly provided.
+  const defaultRoot = process.env.VERCEL
+    ? path.join(os.tmpdir(), 'visit-field-reports')
+    : path.join(process.cwd(), 'uploads', 'visit-field-reports');
+  const root = process.env.VISIT_FIELD_REPORTS_DIR || defaultRoot;
+  if (!existsSync(root)) {
+    mkdirSync(root, { recursive: true });
+  }
   return root;
 }
 
