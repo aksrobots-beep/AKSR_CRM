@@ -28,7 +28,8 @@ export function generateToken(user) {
       can_approve: user.can_approve === 1 || user.can_approve === true
     },
     JWT_SECRET,
-    { expiresIn: '365d' }
+    // No expiry (no `exp` claim). Users stay logged in until JWT_SECRET rotates or token is revoked externally.
+    {}
   );
 }
 
