@@ -28,7 +28,7 @@ export function generateToken(user) {
       can_approve: user.can_approve === 1 || user.can_approve === true
     },
     JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn: '365d' }
   );
 }
 
