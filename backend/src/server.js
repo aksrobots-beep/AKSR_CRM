@@ -16,8 +16,10 @@ import { supplierRoutes } from './routes/suppliers.js';
 import { reportRoutes } from './routes/reports.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { pushTokenRoutes } from './routes/pushTokens.js';
+import { messageLogsRoutes } from './routes/messageLogs.js';
 import { visitRoutes } from './routes/visits.js';
 import { authenticateToken } from './middleware/auth.js';
+import { requireRole } from './middleware/auth.js';
 import { toSafeMessage } from './utils/errorResponse.js';
 
 const app = express();
@@ -384,6 +386,7 @@ app.use('/api/suppliers', authenticateToken, supplierRoutes);
 app.use('/api/reports', authenticateToken, reportRoutes);
 app.use('/api/notifications', authenticateToken, notificationRoutes);
 app.use('/api/push-tokens', authenticateToken, pushTokenRoutes);
+app.use('/api/admin/message-logs', authenticateToken, requireRole('admin', 'ceo'), messageLogsRoutes);
 app.use('/api/visits', authenticateToken, visitRoutes);
 
 // 404 — if you get JSON here, request reached Node; if you still see "Cannot GET ...", the request never reached Node (proxy/config)

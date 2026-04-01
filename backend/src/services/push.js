@@ -1,5 +1,6 @@
 import admin from 'firebase-admin';
 import { query } from '../db/index.js';
+import { logMessageEvent } from './messageLog.js';
 
 let firebaseReady = false;
 
@@ -36,6 +37,12 @@ function ensureFirebase() {
     return true;
   } catch (err) {
     console.error('[push] Firebase init failed:', err?.message || err);
+    void logMessageEvent({
+      channel: 'push',
+      status: 'failed',
+      eventType: 'init',
+      error: err?.message || String(err),
+    });
     return false;
   }
 }
@@ -111,7 +118,34 @@ export async function sendPushToUser(userId, { title, body, link, type }) {
         console.warn('[push] Failed to prune token', e?.message);
       }
     }
+
+    void logMessageEvent({
+      channel: 'push',
+      status: resp.failureCount > 0 && resp.successCount === 0 ? 'failed' : 'sent',
+      eventType: 'notification',
+      userId,
+      title: title || 'Notification',
+      message: body || '',
+      link: link || '',
+      meta: {
+        tokenCount: tokens.length,
+        successCount: resp.successCount,
+        failureCount: resp.failureCount,
+        prunedCount: toDelete.length,
+      },
+    });
   } catch (err) {
     console.error('[push] sendEachForMulticast failed', err?.message || err);
+    void logMessageEvent({
+      channel: 'push',
+      status: 'failed',
+      eventType: 'notification',
+      userId,
+      title: title || 'Notification',
+      message: body || '',
+      link: link || '',
+      error: err?.message || String(err),
+      meta: { tokenCount: tokens.length },
+    });
   }
 }

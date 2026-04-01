@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { logMessageEvent } from './messageLog.js';
 
 function getSmtpConfig() {
   const t = (v) => (v || '').replace(/[\r\n]+/g, '').trim();
@@ -134,6 +135,17 @@ export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, tick
 
   if (!cfg.configured) {
     console.log('[CRM email] Assignment email not sent (SMTP not configured)', { to, ticketNumber });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'ticket_assignment',
+      toEmail: to,
+      subject,
+      title: 'Ticket assigned',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      meta: { reason: 'smtp_not_configured', ticketNumber },
+    });
     return { sent: false, reason: 'smtp_not_configured' };
   }
 
@@ -154,9 +166,32 @@ export async function sendAssignmentEmail({ to, assigneeName, ticketNumber, tick
       html,
     });
     console.log('[CRM email] Assignment email sent', { to, ticketNumber, at: new Date().toISOString() });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'ticket_assignment',
+      toEmail: to,
+      subject,
+      title: 'Ticket assigned',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      meta: { ticketNumber },
+    });
     return { sent: true };
   } catch (err) {
     console.error('[CRM email] Assignment email failed', { to, ticketNumber, error: err?.message });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'ticket_assignment',
+      toEmail: to,
+      subject,
+      title: 'Ticket assigned',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      error: err?.message || String(err),
+      meta: { ticketNumber },
+    });
     return { sent: false, reason: 'send_failed', error: err?.message };
   }
 }
@@ -255,6 +290,18 @@ export async function sendBillingRequestEmail({
 
   if (!cfg.configured) {
     console.log('[CRM email] Billing request email not sent (SMTP not configured)', { to, ticketNumber });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'billing_request',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: 'Billing request',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      meta: { reason: 'smtp_not_configured', ticketNumber },
+    });
     return { sent: false, reason: 'smtp_not_configured' };
   }
 
@@ -291,9 +338,34 @@ export async function sendBillingRequestEmail({
       attachmentCount: mailAttachments.length,
       at: new Date().toISOString(),
     });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'billing_request',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: 'Billing request',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      meta: { ticketNumber, attachmentCount: mailAttachments.length },
+    });
     return { sent: true };
   } catch (err) {
     console.error('[CRM email] Billing request failed', { to, ticketNumber, error: err?.message });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'billing_request',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: 'Billing request',
+      message: `${ticketNumber || ''}: ${ticketTitle || ''}`.trim(),
+      link,
+      error: err?.message || String(err),
+      meta: { ticketNumber },
+    });
     return { sent: false, reason: 'send_failed', error: err?.message };
   }
 }
@@ -328,6 +400,18 @@ export async function sendReminderEmail({ to, cc, name, title, message, link }) 
 
   if (!cfg.configured) {
     console.log('[CRM email] Notification not sent (SMTP not configured)', { to, title: title || 'Reminder' });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'reminder',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: title || 'Reminder',
+      message: message || '',
+      link,
+      meta: { reason: 'smtp_not_configured' },
+    });
     return { sent: false, reason: 'smtp_not_configured' };
   }
 
@@ -355,6 +439,17 @@ export async function sendReminderEmail({ to, cc, name, title, message, link }) 
       subject,
       at: new Date().toISOString(),
     });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'reminder',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: title || 'Reminder',
+      message: message || '',
+      link,
+    });
     return { sent: true };
   } catch (err) {
     console.error('[CRM email] Notification send failed', {
@@ -363,6 +458,18 @@ export async function sendReminderEmail({ to, cc, name, title, message, link }) 
       subject,
       error: err?.message || String(err),
       at: new Date().toISOString(),
+    });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'reminder',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: title || 'Reminder',
+      message: message || '',
+      link,
+      error: err?.message || String(err),
     });
     return { sent: false, reason: 'send_failed', error: err?.message };
   }

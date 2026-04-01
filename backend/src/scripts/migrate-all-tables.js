@@ -151,6 +151,27 @@ async function main() {
       )`,
     },
     {
+      name: 'message_logs',
+      sql: `CREATE TABLE IF NOT EXISTS message_logs (
+        id VARCHAR(36) PRIMARY KEY,
+        channel VARCHAR(20) NOT NULL,
+        status VARCHAR(20) NOT NULL,
+        event_type VARCHAR(50) NULL,
+        user_id VARCHAR(36) NULL,
+        to_email VARCHAR(255) NULL,
+        cc_email VARCHAR(500) NULL,
+        title VARCHAR(255) NULL,
+        subject VARCHAR(255) NULL,
+        message TEXT NULL,
+        link VARCHAR(500) NULL,
+        error TEXT NULL,
+        meta_json LONGTEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_message_logs_channel_status (channel, status, created_at),
+        INDEX idx_message_logs_user (user_id, created_at)
+      )`,
+    },
+    {
       name: 'leave_requests',
       sql: `CREATE TABLE IF NOT EXISTS leave_requests (
         id VARCHAR(36) PRIMARY KEY,

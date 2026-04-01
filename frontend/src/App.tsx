@@ -1,4 +1,6 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { ensurePushListeners, requestPushRegistration } from './push/nativePush';
 import { useAuthStore } from './stores/authStore';
 import { MainLayout } from './components/layout';
 import {
@@ -18,7 +20,27 @@ import {
   // Employees, // Hidden HR functionality
   Suppliers,
   Reports,
+  SiteVisits,
+  FieldCheckIn,
+  MessageLogs,
 } from './pages';
+
+function PushNotificationBridge() {
+  const navigate = useNavigate();
+  const { isAuthenticated, token } = useAuthStore();
+
+  useEffect(() => {
+    ensurePushListeners(navigate);
+  }, [navigate]);
+
+  useEffect(() => {
+    if (isAuthenticated && token) {
+      void requestPushRegistration();
+    }
+  }, [isAuthenticated, token]);
+
+  return null;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -34,6 +56,8 @@ function App() {
   const { isAuthenticated, user } = useAuthStore();
 
   return (
+    <>
+      <PushNotificationBridge />
     <Routes>
       {/* Public Routes */}
       <Route
@@ -71,13 +95,17 @@ function App() {
         <Route path="accounts" element={<Accounts />} />
         <Route path="suppliers" element={<Suppliers />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="site-visits" element={<SiteVisits />} />
+        <Route path="field-check-in" element={<FieldCheckIn />} />
         <Route path="users" element={<Users />} />
+        <Route path="message-logs" element={<MessageLogs />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 
       {/* Catch all */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
 }
 

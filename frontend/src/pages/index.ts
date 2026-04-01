@@ -14,3 +14,6 @@ export { Settings } from './Settings';
 export { Employees } from './Employees';
 export { Suppliers } from './Suppliers';
 export { Reports } from './Reports';
+export { SiteVisits } from './SiteVisits';
+export { FieldCheckIn } from './FieldCheckIn';
+export { MessageLogs } from './MessageLogs';

@@ -1,5 +1,24 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
+type AuthFailureHandler = () => void;
+let authFailureHandler: AuthFailureHandler | null = null;
+
+/** Called when an authenticated request returns invalid/expired token (logout + redirect to login). */
+export function setApiAuthFailureHandler(fn: AuthFailureHandler | null) {
+  authFailureHandler = fn;
+}
+
+function handleAuthErrorResponse(status: number, err: { error?: string; message?: string }, hadToken: boolean) {
+  if (!hadToken || !authFailureHandler) return;
+  const code = err.error || err.message || '';
+  if (status === 403 && code === 'Invalid or expired token') {
+    authFailureHandler();
+  }
+  if (status === 401 && code === 'Access token required') {
+    authFailureHandler();
+  }
+}
+
 class ApiService {
   private token: string | null = null;
 
@@ -38,6 +57,7 @@ class ApiService {
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: 'Request failed' }));
       const msg = err.message || err.error || 'Request failed';
+      handleAuthErrorResponse(response.status, err, Boolean(this.token));
       throw new Error(err.code ? `${msg} (${err.code})` : msg);
     }
 
@@ -61,6 +81,7 @@ class ApiService {
     if (!response.ok) {
       const err = await response.json().catch(() => ({ error: 'Request failed' }));
       const msg = err.message || err.error || 'Request failed';
+      handleAuthErrorResponse(response.status, err, Boolean(this.token));
       throw new Error(err.code ? `${msg} (${err.code})` : msg);
     }
 
@@ -147,6 +168,113 @@ class ApiService {
     });
   }
 
+  async geocodeClientAddress(body: {
+    address?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    postal_code?: string;
+  }) {
+    return this.request<{ lat: number; lng: number; display_name: string; source: string }>('/clients/geocode', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async getClientSite(id: string) {
+    return this.request<{
+      client_id: string;
+      company_name: string;
+      latitude: number | null;
+      longitude: number | null;
+      geofence_radius_m: number | null;
+      effective_radius_m: number;
+      site_configured: boolean;
+    }>(`/clients/${id}/site`);
+  }
+
+  // Site visits (client-site attendance)
+  async getVisits(params?: { client_id?: string; user_id?: string; from?: string; to?: string; name?: string }) {
+    const q = params
+      ? '?' + new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== '') as any).toString()
+      : '';
+    return this.request<any[]>(`/visits${q}`);
+  }
+
+  async getOpenVisits() {
+    return this.request<any[]>('/visits/open');
+  }
+
+  /** Managers: all users’ open visits with optional linked ticket (who is on site for which job). */
+  async getOpenTeamVisits() {
+    return this.request<any[]>('/visits/open-team');
+  }
+
+  async visitCheckIn(body: {
+    client_id: string;
+    lat: number;
+    lng: number;
+    accuracy_m?: number;
+    ticket_id?: string;
+    /** Demo / off-site: fixed 500 m radius around locked coordinates */
+    ad_hoc_site?: boolean;
+    ad_hoc_lat?: number;
+    ad_hoc_lng?: number;
+    /** ISO-8601 when the user initiated check-in (device clock); server accepts if near server time */
+    recorded_at?: string;
+  }) {
+    return this.request<any>('/visits/check-in', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async visitCheckOut(
+    visitId: string,
+    body: {
+      lat: number;
+      lng: number;
+      accuracy_m?: number;
+      force_outside?: boolean;
+      recorded_at?: string;
+    },
+    files?: File[]
+  ) {
+    if (files && files.length > 0) {
+      const fd = new FormData();
+      fd.append('lat', String(body.lat));
+      fd.append('lng', String(body.lng));
+      if (body.accuracy_m != null && body.accuracy_m !== undefined) {
+        fd.append('accuracy_m', String(body.accuracy_m));
+      }
+      if (body.force_outside) fd.append('force_outside', 'true');
+      if (body.recorded_at) fd.append('recorded_at', body.recorded_at);
+      for (const f of files) fd.append('files', f);
+      const headers: HeadersInit = {
+        ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      };
+      const response = await fetch(`${API_BASE}/visits/${visitId}/check-out`, {
+        method: 'PATCH',
+        body: fd,
+        headers,
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ error: 'Request failed' }));
+        const msg = err.message || err.error || 'Request failed';
+        throw new Error(err.code ? `${msg} (${err.code})` : msg);
+      }
+      return response.json() as Promise<any>;
+    }
+    return this.request<any>(`/visits/${visitId}/check-out`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+
+  async downloadVisitFieldReport(visitId: string) {
+    return this.requestBlob(`/visits/${visitId}/field-report`);
+  }
+
   // Tickets
   async getTickets(params?: { status?: string; priority?: string; assigned_to?: string; client_id?: string }) {
     const query = params ? '?' + new URLSearchParams(params as any).toString() : '';
@@ -171,10 +299,10 @@ class ApiService {
     });
   }
 
-  async updateTicketStatus(id: string, status: string) {
+  async updateTicketStatus(id: string, status: string, billingData?: { billing_items?: any[]; billing_notes?: string; attachments?: { filename: string; content: string; contentType: string }[] }) {
     return this.request<any>(`/tickets/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, ...billingData }),
     });
   }
 
@@ -211,6 +339,17 @@ class ApiService {
 
   async markAllNotificationsRead() {
     return this.request<{ ok: boolean }>('/notifications/read-all', { method: 'PATCH' });
+  }
+
+  async registerPushToken(token: string, platform: 'android' | 'ios' = 'android') {
+    return this.request<{ ok: boolean }>('/push-tokens', {
+      method: 'POST',
+      body: JSON.stringify({ token, platform }),
+    });
+  }
+
+  async deletePushTokens() {
+    return this.request<{ ok: boolean }>('/push-tokens', { method: 'DELETE' });
   }
 
   // Equipment
@@ -518,6 +657,12 @@ class ApiService {
     return this.request<any>(`/reports/definitions/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  // Admin: message logs (email/push)
+  async getMessageLogs(params?: { channel?: 'email' | 'push'; status?: 'sent' | 'failed' | 'skipped'; q?: string; limit?: number; offset?: number }) {
+    const qs = params ? '?' + new URLSearchParams(params as any).toString() : '';
+    return this.request<{ items: any[]; total: number }>(`/admin/message-logs${qs}`);
   }
 }
 
