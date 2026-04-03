@@ -42,14 +42,24 @@ export function getVisitFieldReportsRoot() {
   return root;
 }
 
-/** Resolve DB-stored relative path (e.g. visit-field-reports/uuid.zip) under uploads/ */
+/**
+ * Resolve DB-stored relative path (e.g. visit-field-reports/uuid.zip) on disk.
+ * Writes use getVisitFieldReportsRoot() (e.g. /tmp on Vercel); legacy rows may still live under uploads/.
+ */
 export function resolveStoredVisitZip(relStored) {
   const rel = String(relStored || '').trim().replace(/^[/\\]+/, '');
   if (!rel || rel.includes('..')) return null;
   const uploadsRoot = path.resolve(path.join(process.cwd(), 'uploads'));
-  const full = path.resolve(path.join(uploadsRoot, rel));
-  if (!full.startsWith(uploadsRoot)) return null;
-  return full;
+  const legacy = path.resolve(path.join(uploadsRoot, rel));
+  if (legacy.startsWith(uploadsRoot) && existsSync(legacy)) {
+    return legacy;
+  }
+  const base = path.basename(rel);
+  const root = getVisitFieldReportsRoot();
+  const full = path.resolve(path.join(root, base));
+  const rootResolved = path.resolve(root);
+  if (!full.startsWith(rootResolved)) return null;
+  return existsSync(full) ? full : null;
 }
 
 /**

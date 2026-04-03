@@ -73,6 +73,16 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
     console.warn('[email] SMTP not configured. Reset link generated but email not sent.');
     console.warn('[email] Recipient:', to);
     console.warn('[email] Reset link:', resetLink);
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'password_reset',
+      toEmail: to,
+      subject,
+      title: 'Password reset',
+      message: 'Reset link generated; email not sent (SMTP not configured).',
+      meta: { reason: 'smtp_not_configured', expiresMinutes },
+    });
     return { sent: false, reason: 'smtp_not_configured' };
   }
 
@@ -84,16 +94,41 @@ export async function sendPasswordResetEmail({ to, name, resetLink, expiresMinut
     tls: cfg.tls,
   });
 
-  await transporter.sendMail({
-    from: cfg.from,
-    to,
-    subject,
-    text,
-    html,
-  });
-
-  console.log('[CRM email] Password reset sent', { to, at: new Date().toISOString() });
-  return { sent: true };
+  try {
+    await transporter.sendMail({
+      from: cfg.from,
+      to,
+      subject,
+      text,
+      html,
+    });
+    console.log('[CRM email] Password reset sent', { to, at: new Date().toISOString() });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'password_reset',
+      toEmail: to,
+      subject,
+      title: 'Password reset',
+      message: 'Password reset email sent.',
+      meta: { expiresMinutes },
+    });
+    return { sent: true };
+  } catch (err) {
+    console.error('[CRM email] Password reset failed', { to, error: err?.message });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'password_reset',
+      toEmail: to,
+      subject,
+      title: 'Password reset',
+      message: 'Password reset email failed to send.',
+      error: err?.message || String(err),
+      meta: { expiresMinutes },
+    });
+    return { sent: false, reason: 'send_failed', error: err?.message };
+  }
 }
 
 /**

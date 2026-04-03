@@ -29,6 +29,9 @@ function getAccountsEmails() {
 
 const TICKET_FULL_EDIT_ROLES = new Set(['ceo', 'admin', 'service_manager', 'finance']);
 
+/** May create tickets with no client (internal / shop tasks). */
+const TICKET_OMIT_CLIENT_ROLES = new Set(['ceo', 'admin', 'service_manager']);
+
 /** Managers/finance edit any ticket; technicians only if assigned or creator; other roles may edit any. */
 function userCanMutateTicket(user, ticket) {
   if (!user?.id || !ticket) return false;
@@ -103,6 +106,21 @@ function valuesEqualTicketField(a, b) {
   if (a === b) return true;
   if (a == null && b == null) return true;
   return String(a ?? '') === String(b ?? '');
+}
+
+function defaultDueDateForPriority(priorityRaw) {
+  const p = String(priorityRaw || 'medium').trim().toLowerCase();
+  const days =
+    p === 'critical' ? 1 :
+    p === 'high' ? 3 :
+    p === 'low' ? 14 :
+    // medium or unknown
+    7;
+
+  const d = new Date();
+  // Keep consistent with the API's "todayStr" usage (UTC date string).
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function ticketHasNonAssignmentChanges(currentTicket, updates) {
@@ -279,8 +297,15 @@ router.post('/', async (req, res) => {
       is_billable: isBillableRaw,
       support_attachments: supportAttachmentsRaw,
     } = req.body;
-    if (!title || !client_id) return res.status(400).json({ error: 'Title and client are required' });
+    if (!title) return res.status(400).json({ error: 'Title is required' });
+    const clientTrim =
+      client_id != null && String(client_id).trim() !== '' ? String(client_id).trim() : null;
+    if (!clientTrim && !TICKET_OMIT_CLIENT_ROLES.has(req.user.role)) {
+      return res.status(400).json({ error: 'Client is required for your role' });
+    }
+    const resolvedClientId = clientTrim;
     const is_billable = (isBillableRaw === false || isBillableRaw === 'false' || isBillableRaw === 0) ? 0 : 1;
+    const effectivePriority = priority || 'medium';
     // Technicians can create tickets; if they don't assign to anyone, assign to themselves so the ticket appears in their list
     const effectiveAssignedTo = (req.user.role === 'technician' && (assigned_to === '' || assigned_to === null || assigned_to === undefined))
       ? req.user.id
@@ -292,18 +317,23 @@ router.post('/', async (req, res) => {
     const todayStr = new Date().toISOString().slice(0, 10);
     if (dueResult.value && dueResult.value < todayStr) return res.status(400).json({ error: 'Due date cannot be in the past' });
     if (nextResult.value && nextResult.value < todayStr) return res.status(400).json({ error: 'Next action date cannot be in the past' });
+    const defaultDue = defaultDueDateForPriority(effectivePriority);
     const now = new Date().toISOString();
+    // Equipment is tied to clients; omit when there is no client.
+    const equipmentIdResolved = resolvedClientId && equipment_id ? equipment_id : null;
     const ticket = {
       id: uuidv4(),
       ticket_number: await generateTicketNumber(),
       title,
       description: description || '',
-      priority: priority || 'medium',
+      priority: effectivePriority,
       status: effectiveAssignedTo ? 'assigned' : 'new',
-      client_id,
-      equipment_id: equipment_id || null,
+      client_id: resolvedClientId,
+      equipment_id: equipmentIdResolved || null,
       assigned_to: effectiveAssignedTo,
-      due_date: dueResult.value || null,
+      // Always set a due date for newly created tickets.
+      // If the client didn't provide one, derive it from priority.
+      due_date: dueResult.value || defaultDue,
       next_action_date: nextResult.value || null,
       next_action_item: next_action_item || '',
       action_taken: action_taken || '',
