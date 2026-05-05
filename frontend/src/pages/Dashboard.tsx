@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Header } from '../components/layout';
 import { StatsCard } from '../components/ui';
-import { useAppStore } from '../stores/appStore';
 import { useAuthStore } from '../stores/authStore';
+import { api } from '../services/api';
+import { normalizeUserRole } from '../utils/userRole';
 import {
   Ticket,
   Users,
@@ -15,40 +16,89 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 
+type DashStats = {
+  tickets: { total: number; open: number; resolved: number; critical: number };
+  clients: { total: number };
+  equipment: {
+    total: number;
+    robots: number;
+    maintenance_required: number;
+    operational: number;
+  };
+  revenue: { total_revenue: number; pending_amount: number; overdue_count: number };
+  resolvedThisMonth?: number;
+  trends?: {
+    openTickets: { value: number; direction: 'up' | 'down' | 'stable' };
+    activeClients: { value: number; direction: 'up' | 'down' | 'stable' };
+    monthlyRevenue: { value: number; direction: 'up' | 'down' | 'stable' };
+  };
+  period?: { revenueThisMonth?: number; revenuePrevMonth?: number };
+};
+
+type UserSummary = {
+  tasks: {
+    totalAssigned: number;
+    pending: number;
+    inProgress: number;
+    completed: number;
+    overdue: number;
+    completedToday: number;
+  };
+  tickets: {
+    totalAssigned: number;
+    open: number;
+    inProgress: number;
+    resolved: number;
+  };
+};
+
 export function Dashboard() {
-  const { tickets, clients, equipment, invoices, fetchTickets, fetchClients, fetchEquipment, fetchInvoices } = useAppStore();
   const { user } = useAuthStore();
+  const role = normalizeUserRole(user?.role);
+  const isTechnician = role === 'technician';
+  const [stats, setStats] = useState<DashStats | null>(null);
+  const [activity, setActivity] = useState<{ tickets: any[] } | null>(null);
+  const [distribution, setDistribution] = useState<Array<{ status: string; count: number }>>([]);
+  const [userSummary, setUserSummary] = useState<UserSummary | null>(null);
 
   useEffect(() => {
-    fetchTickets();
-    fetchClients();
-    fetchEquipment();
-    fetchInvoices();
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [act, dist, usr, s] = await Promise.all([
+          api.getDashboardActivity(),
+          api.getDashboardTicketDistribution(),
+          api.getDashboardUserSummary(),
+          isTechnician ? Promise.resolve(null) : api.getDashboardStats(),
+        ]);
+        if (!cancelled) {
+          setStats((s as DashStats) || null);
+          setActivity(act);
+          setDistribution(Array.isArray(dist) ? dist : []);
+          setUserSummary(usr as UserSummary);
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTechnician]);
 
-  // Calculate stats
-  const openTickets = tickets.filter((t) => !['resolved', 'closed'].includes(t.status)).length;
-  const criticalTickets = tickets.filter((t) => t.priority === 'critical' && t.status !== 'closed').length;
-  const resolvedThisMonth = tickets.filter((t) => 
-    t.status === 'resolved' && 
-    t.resolvedAt && 
-    new Date(t.resolvedAt).getMonth() === new Date().getMonth()
-  ).length;
+  const distTotal = useMemo(
+    () => distribution.reduce((sum, x) => sum + (Number(x.count) || 0), 0),
+    [distribution]
+  );
 
-  const totalRevenue = invoices
-    .filter((i) => i.status === 'paid')
-    .reduce((sum, i) => sum + i.total, 0);
+  const countForStatus = (status: string) =>
+    distribution.find((x) => x.status === status)?.count ?? 0;
 
-  const pendingInvoices = invoices.filter((i) => ['sent', 'overdue'].includes(i.status));
-  const pendingAmount = pendingInvoices.reduce((sum, i) => sum + (i.total - i.paidAmount), 0);
-
-  const robotCount = equipment.length; // Total equipment count
-  const maintenanceRequired = equipment.filter((e) => e.status === 'maintenance_required').length;
-
-  // Recent tickets for activity feed
-  const recentTickets = [...tickets]
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 5);
+  const recentTickets = useMemo(() => {
+    const rows = activity?.tickets;
+    if (!Array.isArray(rows)) return [];
+    return rows.slice(0, 5);
+  }, [activity]);
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
@@ -62,6 +112,12 @@ export function Dashboard() {
     return colors[status] || 'bg-neutral-100 text-neutral-700';
   };
 
+  const openTrend = stats?.trends?.openTickets;
+  const clientsTrend = stats?.trends?.activeClients;
+  const revenueTrend = stats?.trends?.monthlyRevenue;
+
+  const monthlyRevenueDisplay = stats?.period?.revenueThisMonth ?? stats?.revenue?.total_revenue ?? 0;
+
   return (
     <div className="min-h-screen">
       <Header
@@ -70,50 +126,64 @@ export function Dashboard() {
       />
 
       <div className="p-6 space-y-6 animate-stagger">
-        {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {!isTechnician && (
+            <>
+              <StatsCard
+                title="Open Tickets"
+                value={stats?.tickets?.open ?? '—'}
+                icon={<Ticket className="w-5 h-5" />}
+                color="primary"
+                trend={openTrend ? { value: openTrend.value, direction: openTrend.direction } : undefined}
+              />
+              <StatsCard
+                title="Active Clients"
+                value={stats?.clients?.total ?? '—'}
+                icon={<Users className="w-5 h-5" />}
+                color="success"
+                trend={clientsTrend ? { value: clientsTrend.value, direction: clientsTrend.direction } : undefined}
+              />
+              <StatsCard
+                title="Managed Robots"
+                value={stats?.equipment?.robots ?? '—'}
+                icon={<Bot className="w-5 h-5" />}
+                color="accent"
+              />
+              <StatsCard
+                title="Monthly Revenue"
+                value={
+                  stats ? `RM ${Number(monthlyRevenueDisplay).toLocaleString()}` : '—'
+                }
+                icon={<DollarSign className="w-5 h-5" />}
+                color="success"
+                trend={revenueTrend ? { value: revenueTrend.value, direction: revenueTrend.direction } : undefined}
+              />
+            </>
+          )}
           <StatsCard
-            title="Open Tickets"
-            value={openTickets}
+            title="My Open Tasks"
+            value={userSummary?.tasks?.inProgress != null ? userSummary.tasks.inProgress + userSummary.tasks.pending : '—'}
+            icon={<Clock className="w-5 h-5" />}
+            color="warning"
+          />
+          <StatsCard
+            title="My Open Tickets"
+            value={userSummary?.tickets?.open ?? '—'}
             icon={<Ticket className="w-5 h-5" />}
-            color="primary"
-            trend={{ value: 12, direction: 'up' }}
-          />
-          <StatsCard
-            title="Active Clients"
-            value={clients.length}
-            icon={<Users className="w-5 h-5" />}
-            color="success"
-            trend={{ value: 8, direction: 'up' }}
-          />
-          <StatsCard
-            title="Managed Robots"
-            value={robotCount}
-            icon={<Bot className="w-5 h-5" />}
             color="accent"
-          />
-          <StatsCard
-            title="Monthly Revenue"
-            value={`RM ${totalRevenue.toLocaleString()}`}
-            icon={<DollarSign className="w-5 h-5" />}
-            color="success"
-            trend={{ value: 15, direction: 'up' }}
           />
         </div>
 
-        {/* Main Content Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Alerts & Activity */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Alerts */}
-            {(criticalTickets > 0 || maintenanceRequired > 0) && (
+            {!isTechnician && ((stats?.tickets?.critical ?? 0) > 0 || (stats?.equipment?.maintenance_required ?? 0) > 0) ? (
               <div className="card p-5">
                 <h3 className="font-semibold text-neutral-900 flex items-center gap-2 mb-4">
                   <AlertTriangle className="w-5 h-5 text-warning-500" />
                   Attention Required
                 </h3>
                 <div className="space-y-3">
-                  {criticalTickets > 0 && (
+                  {(stats?.tickets?.critical ?? 0) > 0 && (
                     <div className="flex items-center justify-between p-3 bg-danger-50 rounded-lg border border-danger-100">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-danger-100 flex items-center justify-center">
@@ -121,12 +191,14 @@ export function Dashboard() {
                         </div>
                         <div>
                           <p className="font-medium text-danger-900">Critical Tickets</p>
-                          <p className="text-sm text-danger-700">{criticalTickets} ticket(s) need immediate attention</p>
+                          <p className="text-sm text-danger-700">
+                            {stats?.tickets?.critical} ticket(s) need immediate attention
+                          </p>
                         </div>
                       </div>
                     </div>
                   )}
-                  {maintenanceRequired > 0 && (
+                  {(stats?.equipment?.maintenance_required ?? 0) > 0 && (
                     <div className="flex items-center justify-between p-3 bg-warning-50 rounded-lg border border-warning-100">
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-lg bg-warning-100 flex items-center justify-center">
@@ -134,26 +206,27 @@ export function Dashboard() {
                         </div>
                         <div>
                           <p className="font-medium text-warning-900">Maintenance Required</p>
-                          <p className="text-sm text-warning-700">{maintenanceRequired} equipment need servicing</p>
+                          <p className="text-sm text-warning-700">
+                            {stats?.equipment?.maintenance_required} equipment need servicing
+                          </p>
                         </div>
                       </div>
                     </div>
                   )}
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {/* Recent Activity */}
             <div className="card p-5">
               <h3 className="font-semibold text-neutral-900 flex items-center gap-2 mb-4">
                 <Clock className="w-5 h-5 text-primary-500" />
-                Recent Activity
+                {isTechnician ? 'My Ticket Activity' : 'Recent Activity'}
               </h3>
               <div className="space-y-3">
                 {recentTickets.length === 0 ? (
                   <p className="text-neutral-500 text-center py-4">No recent activity</p>
                 ) : (
-                  recentTickets.map((ticket) => (
+                  recentTickets.map((ticket: any) => (
                     <div
                       key={ticket.id}
                       className="flex items-center gap-4 p-3 rounded-lg hover:bg-neutral-50 transition-colors cursor-pointer"
@@ -163,10 +236,10 @@ export function Dashboard() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-neutral-900 truncate">{ticket.title}</p>
-                        <p className="text-sm text-neutral-500">{ticket.ticketNumber}</p>
+                        <p className="text-sm text-neutral-500">{ticket.ticket_number}</p>
                       </div>
                       <span className={`badge ${getStatusColor(ticket.status)}`}>
-                        {ticket.status.replace('_', ' ')}
+                        {String(ticket.status || '').replace('_', ' ')}
                       </span>
                     </div>
                   ))
@@ -175,10 +248,9 @@ export function Dashboard() {
             </div>
           </div>
 
-          {/* Right Column - Stats & Quick Actions */}
           <div className="space-y-6">
-            {/* Performance Overview */}
-            <div className="card p-5">
+            {!isTechnician && (
+              <div className="card p-5">
               <h3 className="font-semibold text-neutral-900 flex items-center gap-2 mb-4">
                 <TrendingUp className="w-5 h-5 text-success-500" />
                 Performance
@@ -186,22 +258,55 @@ export function Dashboard() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-neutral-600">Resolved This Month</span>
-                  <span className="font-semibold text-neutral-900">{resolvedThisMonth}</span>
+                  <span className="font-semibold text-neutral-900">{stats?.resolvedThisMonth ?? '—'}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-neutral-600">Pending Invoices</span>
-                  <span className="font-semibold text-neutral-900">RM {pendingAmount.toLocaleString()}</span>
+                  <span className="font-semibold text-neutral-900">
+                    RM {(stats?.revenue?.pending_amount ?? 0).toLocaleString()}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-neutral-600">Equipment Operational</span>
                   <span className="font-semibold text-success-600">
-                    {equipment.filter((e) => e.status === 'operational').length}/{equipment.length}
+                    {stats?.equipment?.total
+                      ? `${stats.equipment.operational}/${stats.equipment.total}`
+                      : '—'}
+                  </span>
+                </div>
+              </div>
+              </div>
+            )}
+
+            <div className="card p-5">
+              <h3 className="font-semibold text-neutral-900 flex items-center gap-2 mb-4">
+                <CheckCircle className="w-5 h-5 text-primary-500" />
+                My Workload
+              </h3>
+              <div className="space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-600">Tasks pending / in progress</span>
+                  <span className="font-semibold text-neutral-900">
+                    {userSummary ? `${userSummary.tasks.pending} / ${userSummary.tasks.inProgress}` : '—'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-600">Tasks overdue</span>
+                  <span className="font-semibold text-danger-600">{userSummary?.tasks?.overdue ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-600">Tasks completed today</span>
+                  <span className="font-semibold text-success-600">{userSummary?.tasks?.completedToday ?? '—'}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-neutral-600">Tickets open / resolved</span>
+                  <span className="font-semibold text-neutral-900">
+                    {userSummary ? `${userSummary.tickets.open} / ${userSummary.tickets.resolved}` : '—'}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Ticket Status Distribution */}
             <div className="card p-5">
               <h3 className="font-semibold text-neutral-900 flex items-center gap-2 mb-4">
                 <CheckCircle className="w-5 h-5 text-primary-500" />
@@ -214,8 +319,8 @@ export function Dashboard() {
                   { status: 'pending_parts', label: 'Pending Parts', color: 'bg-orange-500' },
                   { status: 'resolved', label: 'Resolved', color: 'bg-success-500' },
                 ].map(({ status, label, color }) => {
-                  const count = tickets.filter((t) => t.status === status).length;
-                  const percentage = tickets.length > 0 ? (count / tickets.length) * 100 : 0;
+                  const count = countForStatus(status);
+                  const percentage = distTotal > 0 ? (count / distTotal) * 100 : 0;
                   return (
                     <div key={status}>
                       <div className="flex items-center justify-between text-sm mb-1">

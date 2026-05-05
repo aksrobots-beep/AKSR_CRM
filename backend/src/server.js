@@ -17,10 +17,18 @@ import { reportRoutes } from './routes/reports.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { pushTokenRoutes } from './routes/pushTokens.js';
 import { messageLogsRoutes } from './routes/messageLogs.js';
+import { activityLogsRoutes } from './routes/activityLogs.js';
 import { visitRoutes } from './routes/visits.js';
+import { salesModuleRoutes } from './routes/salesModule.js';
+import { taskRoutes } from './routes/tasks.js';
+import { taskDiaryRoutes } from './routes/taskDiary.js';
+import { taskReportRoutes } from './routes/taskReports.js';
+import { microsoftTodoRoutes } from './routes/microsoftTodo.js';
+import { runTaskReminderSweep } from './services/taskReminders.js';
 import { authenticateToken } from './middleware/auth.js';
 import { requireRole } from './middleware/auth.js';
 import { toSafeMessage } from './utils/errorResponse.js';
+import { isDebugRoutesEnabled } from './utils/debugRoutes.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -29,11 +37,19 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({
   origin: function (origin, callback) {
     const allowed = (process.env.CORS_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (!origin || allowed.length === 0 || allowed.includes('*') || allowed.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, true); // allow all in practice; tighten via CORS_ORIGIN env var
+    if (!origin) {
+      return callback(null, true);
     }
+    if (allowed.includes('*')) {
+      return callback(null, true);
+    }
+    if (allowed.includes(origin)) {
+      return callback(null, true);
+    }
+    if (allowed.length === 0 && process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
 }));
@@ -48,19 +64,40 @@ app.get('/ping', (req, res) => {
 });
 
 // DB connectivity check handler (reused by health routes)
+const appEnvLabel =
+  process.env.APP_ENV || (process.env.VERCEL && process.env.NODE_ENV === 'production' ? 'production' : 'development');
+
+function wantsDbHealthCheck(queryObj) {
+  const d = queryObj?.db;
+  if (d === '1' || d === 1 || d === true) return true;
+  if (Array.isArray(d)) return d.some((x) => x === '1' || x === 1);
+  if (typeof d === 'string' && d.trim() === '1') return true;
+  return queryObj?.check === 'db';
+}
+
+const dbEngineLabel = () =>
+  (process.env.DB_ENGINE || 'mysql').toLowerCase() === 'postgres' ? 'postgres' : 'mysql';
+
 const healthDbHandler = async (req, res) => {
   if (typeof query !== 'function') {
-    return res.json({ ok: true, database: 'json' });
+    return res.json({ ok: true, database: 'json', app_env: appEnvLabel });
   }
   try {
     await query('SELECT 1');
-    res.json({ ok: true, database: 'mysql' });
+    res.json({
+      ok: true,
+      database: dbEngineLabel(),
+      app_env: appEnvLabel,
+      db_name: process.env.DB_NAME || '(not set)',
+      db_host: process.env.DB_HOST || '(not set)',
+    });
   } catch (err) {
     console.error('Health DB error:', err?.message || err, 'code:', err?.code);
     res.status(500).json({
       ok: false,
       error: err?.message || 'Database connection failed',
       code: err?.code || 'DB_ERROR',
+      app_env: appEnvLabel,
     });
   }
 };
@@ -70,6 +107,9 @@ const healthDbHandler = async (req, res) => {
 app.get('/api/health', async (req, res) => {
   // Login diagnostic test
   if (req.query.test === 'login') {
+    if (!isDebugRoutesEnabled()) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     try {
       const bcrypt = await import('bcryptjs').then(m => m.default);
       const testEmail = process.env.DEBUG_LOGIN_EMAIL;
@@ -166,12 +206,15 @@ app.get('/api/health', async (req, res) => {
   }
   
   // DB check
-  if (req.query.db === '1' || req.query.check === 'db') {
+  if (wantsDbHealthCheck(req.query)) {
     return healthDbHandler(req, res);
   }
   
   // SMTP diagnostic
   if (req.query.check === 'smtp') {
+    if (!isDebugRoutesEnabled()) {
+      return res.status(404).json({ error: 'Not found' });
+    }
     const pass = process.env.SMTP_PASS || '';
     return res.json({
       smtp_host: process.env.SMTP_HOST || '(not set)',
@@ -186,21 +229,31 @@ app.get('/api/health', async (req, res) => {
   }
 
   // Default health check — version helps verify deployment
-  res.json({ status: 'ok', version: '2026-03-19-v3', timestamp: new Date().toISOString(), db_name: process.env.DB_NAME || '(not set)', db_host: process.env.DB_HOST || '(not set)' });
+  res.json({
+    status: 'ok',
+    version: '2026-03-19-v3',
+    timestamp: new Date().toISOString(),
+    app_env: appEnvLabel,
+    db_name: process.env.DB_NAME || '(not set)',
+    db_host: process.env.DB_HOST || '(not set)',
+  });
 });
 app.get('/health', async (req, res) => {
-  if (req.query.db === '1' || req.query.check === 'db') {
+  if (wantsDbHealthCheck(req.query)) {
     return healthDbHandler(req, res);
   }
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), app_env: appEnvLabel });
 });
 
 // Dedicated DB health paths
 app.get('/api/health/db', healthDbHandler);
 app.get('/health/db', healthDbHandler);
 
-// Debug endpoint - accessible via browser to diagnose login issues
+// Debug endpoint - accessible via browser to diagnose login issues (non-production or ENABLE_DEBUG_ROUTES=1)
 app.get('/api/debug/login-test', async (req, res) => {
+  if (!isDebugRoutesEnabled()) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   try {
     const bcrypt = await import('bcryptjs').then(m => m.default);
     const testEmail = process.env.DEBUG_LOGIN_EMAIL;
@@ -296,77 +349,13 @@ app.get('/api/debug/login-test', async (req, res) => {
   }
 });
 
-// ======================================================================
-// TEMPORARY: Emergency admin reset — browser-accessible GET endpoint.
-// >>> REMOVE THIS BLOCK after production login is confirmed working <<<
-// Usage: GET /api/emergency-reset?secret=AK-EMERGENCY-2026-RESET
-// ======================================================================
-app.get('/api/emergency-reset', async (req, res) => {
-  const RESET_SECRET = 'AK-EMERGENCY-2026-RESET';
-  const ADMIN_EMAIL = 'admin@aksuccess.com.my';
-  const NEW_PASSWORD = 'admin123';
-
-  if (req.query.secret !== RESET_SECRET) {
-    return res.status(403).json({ error: 'Append ?secret=AK-EMERGENCY-2026-RESET to URL' });
-  }
-
-  const bcrypt = await import('bcryptjs').then(m => m.default);
-  const logs = [];
-
-  try {
-    logs.push('=== EMERGENCY ADMIN RESET ===');
-    logs.push(`DB_HOST: ${process.env.DB_HOST || '(not set)'}`);
-    logs.push(`DB_NAME: ${process.env.DB_NAME || '(not set)'}`);
-    logs.push(`DB_USER: ${process.env.DB_USER || '(not set)'}`);
-
-    if (typeof query !== 'function') {
-      logs.push('ERROR: query function not available');
-      return res.json({ success: false, logs });
-    }
-
-    await query('SELECT 1');
-    logs.push('DB connection: OK');
-
-    const allUsers = await query('SELECT id, email, role, is_active, LENGTH(password) as pass_len FROM users ORDER BY email');
-    logs.push(`Total users: ${allUsers.length}`);
-    for (const u of allUsers) {
-      logs.push(`  ${u.email} | role=${u.role} | active=${u.is_active} | pass_len=${u.pass_len}`);
-    }
-
-    const rows = await query("SELECT * FROM users WHERE LOWER(TRIM(email)) = ? LIMIT 1", [ADMIN_EMAIL.toLowerCase()]);
-    const adminUser = (Array.isArray(rows) ? rows : [])[0] || null;
-
-    const freshHash = bcrypt.hashSync(NEW_PASSWORD, 10);
-
-    if (adminUser) {
-      let oldHash = adminUser.password ?? '';
-      if (Buffer.isBuffer(oldHash)) oldHash = oldHash.toString('utf8');
-      else oldHash = String(oldHash);
-      logs.push(`Admin found: id=${adminUser.id}, active=${adminUser.is_active}, hash_len=${oldHash.length}`);
-      logs.push(`Old hash matches admin123: ${bcrypt.compareSync(NEW_PASSWORD, oldHash.trim())}`);
-
-      await query("UPDATE users SET password = ?, is_active = 1, updated_at = NOW() WHERE id = ?", [freshHash, adminUser.id]);
-      logs.push('Password UPDATED with fresh hash');
-    } else {
-      const { v4: uuidv4 } = await import('uuid');
-      const newId = uuidv4();
-      await query(
-        "INSERT INTO users (id, email, password, name, role, department, can_approve, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
-        [newId, ADMIN_EMAIL, freshHash, 'System Administrator', 'admin', 'Management', 1, 1]
-      );
-      logs.push(`Admin CREATED: id=${newId}`);
-    }
-
-    const verify = await query("SELECT email, is_active, LENGTH(password) as pass_len FROM users WHERE LOWER(TRIM(email)) = ?", [ADMIN_EMAIL.toLowerCase()]);
-    const v = (Array.isArray(verify) ? verify : [])[0];
-    if (v) logs.push(`Verified: email=${v.email}, active=${v.is_active}, pass_len=${v.pass_len}`);
-
-    logs.push(`Login with: ${ADMIN_EMAIL} / ${NEW_PASSWORD}`);
-    res.json({ success: true, logs });
-  } catch (err) {
-    logs.push(`ERROR: ${err.message}`);
-    res.json({ success: false, error: err.message, logs });
-  }
+// Quick check you are on this API (wrong process on PORT often returns HTML 404 for /api/auth/login)
+app.get('/api', (req, res) => {
+  res.json({
+    app: 'ak-crm-api',
+    auth: { login: 'POST /api/auth/login' },
+    health: 'GET /api/health',
+  });
 });
 
 // Public routes
@@ -387,11 +376,30 @@ app.use('/api/reports', authenticateToken, reportRoutes);
 app.use('/api/notifications', authenticateToken, notificationRoutes);
 app.use('/api/push-tokens', authenticateToken, pushTokenRoutes);
 app.use('/api/admin/message-logs', authenticateToken, requireRole('admin', 'ceo'), messageLogsRoutes);
+app.use(
+  '/api/admin/activity-logs',
+  authenticateToken,
+  requireRole('ceo', 'admin', 'service_manager', 'hr_manager', 'finance', 'sales', 'operations'),
+  activityLogsRoutes
+);
 app.use('/api/visits', authenticateToken, visitRoutes);
+app.use('/api/sales', authenticateToken, salesModuleRoutes);
+app.use('/api/tasks', authenticateToken, taskRoutes);
+app.use('/api/task-diary', authenticateToken, taskDiaryRoutes);
+app.use('/api/task-reports', authenticateToken, taskReportRoutes);
+app.use('/api/microsoft', microsoftTodoRoutes);
 
 // 404 — if you get JSON here, request reached Node; if you still see "Cannot GET ...", the request never reached Node (proxy/config)
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found', path: req.path });
+});
+
+// CORS rejection (cors package passes callback(new Error('Not allowed by CORS')))
+app.use((err, req, res, next) => {
+  if (err && String(err.message || '').includes('Not allowed by CORS')) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+  next(err);
 });
 
 // Error handling — return a proper message instead of generic "Internal server error"
@@ -416,7 +424,26 @@ if (!process.env.VERCEL) {
 
   app.listen(PORT, () => {
     console.log(`🚀 AK Success CRM API running on http://localhost:${PORT}`);
+    console.log(`   Login: POST http://localhost:${PORT}/api/auth/login`);
+    console.log(`   Sanity: GET  http://localhost:${PORT}/api  → JSON with app "ak-crm-api"`);
+    console.log(`   APP_ENV=${appEnvLabel}  DB_NAME=${process.env.DB_NAME || '(not set)'}`);
+    if (appEnvLabel === 'staging') {
+      console.warn(
+        '   [APP_ENV=staging] Use a staging MySQL only — see docs/STAGING-AND-PRODUCTION-MYSQL.md'
+      );
+    }
   });
+
+  if (process.env.TASK_REMINDER_ENABLED === '1') {
+    const intervalMs = Math.max(60_000, parseInt(process.env.TASK_REMINDER_INTERVAL_MS || '900000', 10) || 900000);
+    console.log(`[task-reminders] enabled, interval ${intervalMs}ms`);
+    setInterval(() => {
+      runTaskReminderSweep().catch((err) => console.error('[task-reminders]', err?.message || err));
+    }, intervalMs);
+    setTimeout(() => {
+      runTaskReminderSweep().catch((err) => console.error('[task-reminders]', err?.message || err));
+    }, 15_000);
+  }
 }
 
 export default app;

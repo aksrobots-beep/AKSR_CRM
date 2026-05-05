@@ -224,6 +224,7 @@ async function initMySQL() {
         serial_number VARCHAR(100) NOT NULL,
         status VARCHAR(20) DEFAULT 'available',
         notes TEXT,
+        is_active TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_by VARCHAR(36),
         FOREIGN KEY (inventory_id) REFERENCES inventory(id) ON DELETE CASCADE,
@@ -236,6 +237,7 @@ async function initMySQL() {
         inventory_id VARCHAR(36) NOT NULL,
         quantity INT NOT NULL,
         unit_price DECIMAL(12,2) DEFAULT 0,
+        is_active TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_by VARCHAR(36),
         FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
@@ -332,6 +334,7 @@ async function initMySQL() {
         paid_amount DECIMAL(12,2) DEFAULT 0,
         status VARCHAR(50) DEFAULT 'draft',
         notes TEXT,
+        is_active TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         created_by VARCHAR(36),
@@ -382,6 +385,74 @@ async function initMySQL() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
       )`,
 
+      `CREATE TABLE IF NOT EXISTS tasks (
+        id VARCHAR(36) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        ticket_id VARCHAR(36) NULL,
+        assigned_to VARCHAR(36) NOT NULL,
+        assigned_by VARCHAR(36) NOT NULL,
+        priority VARCHAR(20) NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'pending',
+        due_date DATE NOT NULL,
+        due_at DATETIME NULL,
+        completed_at DATETIME NULL,
+        in_progress_started_at DATETIME NULL,
+        reminder_at DATETIME NULL,
+        reminder_sent_at DATETIME NULL,
+        last_activity_at DATETIME NULL,
+        reminder_due_day_sent_for DATE NULL,
+        reminder_due_hour_sent_at DATETIME NULL,
+        manager_overdue_notified_at DATE NULL,
+        manager_stale_notified_at DATE NULL,
+        microsoft_todo_item_id VARCHAR(128) NULL,
+        task_category VARCHAR(32) NOT NULL DEFAULT 'meeting',
+        is_active TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (assigned_to) REFERENCES users(id),
+        FOREIGN KEY (assigned_by) REFERENCES users(id),
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE SET NULL,
+        INDEX idx_tasks_assignee_status_due (assigned_to, status, due_date),
+        INDEX idx_tasks_assigner (assigned_by),
+        INDEX idx_tasks_due_status (due_date, status),
+        INDEX idx_tasks_last_activity (last_activity_at),
+        INDEX idx_tasks_ticket (ticket_id)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS task_logs (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        task_id VARCHAR(36) NULL,
+        work_date DATE NOT NULL,
+        start_time TIME NOT NULL,
+        end_time TIME NOT NULL,
+        total_minutes INT NOT NULL,
+        notes TEXT,
+        work_category VARCHAR(32) NULL,
+        attachment_path VARCHAR(512) NULL,
+        attachment_original_name VARCHAR(255) NULL,
+        attachment_mime VARCHAR(128) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE SET NULL,
+        INDEX idx_task_logs_user_date (user_id, work_date),
+        INDEX idx_task_logs_task (task_id),
+        INDEX idx_task_logs_work_date (work_date)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS user_microsoft_graph (
+        user_id VARCHAR(36) PRIMARY KEY,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT,
+        expires_at DATETIME NOT NULL,
+        ms_account_id VARCHAR(128) NULL,
+        todo_list_id VARCHAR(128) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )`,
+
       `CREATE TABLE IF NOT EXISTS report_definitions (
         id VARCHAR(36) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
@@ -389,6 +460,7 @@ async function initMySQL() {
         config_json JSON NOT NULL,
         is_public TINYINT DEFAULT 0,
         owner_user_id VARCHAR(36) NOT NULL,
+        is_active TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -437,6 +509,85 @@ async function initMySQL() {
         created_by VARCHAR(36),
         updated_by VARCHAR(36)
       )`,
+
+      `CREATE TABLE IF NOT EXISTS quotations (
+        id VARCHAR(36) PRIMARY KEY,
+        ticket_id VARCHAR(36) NOT NULL,
+        client_id VARCHAR(36) NOT NULL,
+        quotation_number VARCHAR(50) UNIQUE NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'draft',
+        line_items JSON,
+        valid_until DATE NULL,
+        notes TEXT,
+        approved_at DATETIME NULL,
+        rejection_reason TEXT NULL,
+        is_active TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(36),
+        updated_by VARCHAR(36),
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+        INDEX idx_quotations_ticket (ticket_id),
+        INDEX idx_quotations_status (status)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS client_purchase_orders (
+        id VARCHAR(36) PRIMARY KEY,
+        ticket_id VARCHAR(36) NOT NULL,
+        quotation_id VARCHAR(36) NULL,
+        po_number VARCHAR(100) NOT NULL,
+        po_date DATE NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'requested',
+        notes TEXT,
+        is_active TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(36),
+        updated_by VARCHAR(36),
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+        FOREIGN KEY (quotation_id) REFERENCES quotations(id) ON DELETE SET NULL,
+        INDEX idx_cpo_ticket (ticket_id)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS delivery_orders (
+        id VARCHAR(36) PRIMARY KEY,
+        ticket_id VARCHAR(36) NOT NULL,
+        delivery_number VARCHAR(50) UNIQUE NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'draft',
+        notes TEXT,
+        issued_at DATETIME NULL,
+        acknowledged_at DATETIME NULL,
+        acknowledged_by VARCHAR(36) NULL,
+        is_active TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(36),
+        updated_by VARCHAR(36),
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+        FOREIGN KEY (acknowledged_by) REFERENCES users(id) ON DELETE SET NULL,
+        INDEX idx_do_ticket (ticket_id)
+      )`,
+
+      `CREATE TABLE IF NOT EXISTS accounting_requests (
+        id VARCHAR(36) PRIMARY KEY,
+        ticket_id VARCHAR(36) NOT NULL,
+        request_type VARCHAR(50) NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'open',
+        message TEXT,
+        assigned_to VARCHAR(36) NULL,
+        resolved_notes TEXT NULL,
+        is_active TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_by VARCHAR(36),
+        updated_by VARCHAR(36),
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+        FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL,
+        INDEX idx_ar_ticket (ticket_id),
+        INDEX idx_ar_status (status),
+        INDEX idx_ar_type (request_type)
+      )`,
     ];
 
     for (const sql of tables) {
@@ -470,6 +621,8 @@ async function initMySQL() {
         { id: uuidv4(), email: 'tech@aksuccess.com', password: hashedPassword, name: 'Rajan Kumar', role: 'technician', department: 'Service', can_approve: 0 },
         { id: uuidv4(), email: 'hr@aksuccess.com', password: hashedPassword, name: 'Lisa Chen', role: 'hr_manager', department: 'HR', can_approve: 1 },
         { id: uuidv4(), email: 'finance@aksuccess.com', password: hashedPassword, name: 'Michael Lee', role: 'finance', department: 'Finance', can_approve: 1 },
+        { id: uuidv4(), email: 'sales@aksuccess.com', password: hashedPassword, name: 'Nur Sales', role: 'sales', department: 'Sales', can_approve: 0 },
+        { id: uuidv4(), email: 'ops@aksuccess.com', password: hashedPassword, name: 'Operations Lead', role: 'operations', department: 'Operations', can_approve: 0 },
       ];
 
       for (const user of users) {
@@ -549,6 +702,60 @@ async function initMySQL() {
       }
       console.log('✓ Tickets created');
 
+      // Employee tasks + diary (demo)
+      const inThreeDays = new Date();
+      inThreeDays.setDate(inThreeDays.getDate() + 3);
+      const dueSoon = inThreeDays.toISOString().slice(0, 10);
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yStr = yesterday.toISOString().slice(0, 10);
+
+      const task1 = uuidv4();
+      const task2 = uuidv4();
+      const task3 = uuidv4();
+      await connection.execute(
+        `INSERT INTO tasks (id, title, description, ticket_id, assigned_to, assigned_by, priority, status, due_date, last_activity_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          task1,
+          'Review service contract templates',
+          'Prepare Q1 template updates for legal review.',
+          tickets[0].id,
+          techId,
+          managerId,
+          'high',
+          'in_progress',
+          dueSoon,
+          now,
+          now,
+          now,
+        ]
+      );
+      await connection.execute(
+        `INSERT INTO tasks (id, title, description, ticket_id, assigned_to, assigned_by, priority, status, due_date, completed_at, last_activity_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [task2, 'Update client contact spreadsheet', 'Verify phone numbers for top 10 accounts.', null, techId, managerId, 'medium', 'completed', yStr, now, now, now, now]
+      );
+      await connection.execute(
+        `INSERT INTO tasks (id, title, description, ticket_id, assigned_to, assigned_by, priority, status, due_date, last_activity_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [task3, 'Shadow senior on-site visit', 'Observe PM checklist at Golden Dragon.', null, techId, managerId, 'low', 'pending', dueSoon, now, now, now]
+      );
+
+      const log1 = uuidv4();
+      const log2 = uuidv4();
+      await connection.execute(
+        `INSERT INTO task_logs (id, user_id, task_id, work_date, start_time, end_time, total_minutes, notes, created_at)
+         VALUES (?, ?, ?, ?, '09:00:00', '11:30:00', 150, ?, ?)`,
+        [log1, techId, task1, yStr, 'Drafted contract section headers and terminology.', now]
+      );
+      await connection.execute(
+        `INSERT INTO task_logs (id, user_id, task_id, work_date, start_time, end_time, total_minutes, notes, created_at)
+         VALUES (?, ?, ?, ?, '14:00:00', '15:15:00', 75, ?, ?)`,
+        [log2, techId, task2, yStr, 'Completed spreadsheet updates and validation.', now]
+      );
+      console.log('✓ Tasks & task diary seed created');
+
       console.log('\n✅ Database initialized successfully!');
     }
 
@@ -559,6 +766,8 @@ async function initMySQL() {
     console.log('  - tech@aksuccess.com (Technician)');
     console.log('  - hr@aksuccess.com (HR Manager)');
     console.log('  - finance@aksuccess.com (Finance)');
+    console.log('  - sales@aksuccess.com (Sales)');
+    console.log('  - ops@aksuccess.com (Operations)');
 
   } catch (error) {
     console.error('❌ Error initializing database:', error);
