@@ -3,14 +3,19 @@
  * Call from load-env.js after dotenv so all entrypoints share the same rule.
  */
 export function validateEnvOrExit() {
+  const runningOnVercel = Boolean(process.env.VERCEL);
   const dbEngine = (process.env.DB_ENGINE || 'mysql').toLowerCase();
   if (dbEngine === 'postgres') {
     const url = process.env.DATABASE_URL;
     if (!url || (!String(url).startsWith('postgresql:') && !String(url).startsWith('postgres:'))) {
-      console.error(
-        '[validateEnv] FATAL: DB_ENGINE=postgres requires DATABASE_URL (postgresql:// or postgres://).'
-      );
-      process.exit(1);
+      const msg =
+        '[validateEnv] DB_ENGINE=postgres requires DATABASE_URL (postgresql:// or postgres://).';
+      if (runningOnVercel) {
+        console.error(`${msg} Continuing on serverless to avoid hard crash.`);
+      } else {
+        console.error(`[validateEnv] FATAL: ${msg}`);
+        process.exit(1);
+      }
     }
   }
 
@@ -20,10 +25,14 @@ export function validateEnvOrExit() {
   }
   const secret = process.env.JWT_SECRET;
   if (!secret || String(secret).length < 32) {
-    console.error(
-      '[validateEnv] FATAL: JWT_SECRET must be set and at least 32 characters.\n' +
-        '  Generate: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"'
-    );
+    const msg =
+      '[validateEnv] JWT_SECRET must be set and at least 32 characters.\n' +
+      '  Generate: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"';
+    if (runningOnVercel) {
+      console.error(`${msg}\n[validateEnv] Continuing on serverless to avoid hard crash.`);
+      return;
+    }
+    console.error(`[validateEnv] FATAL: ${msg}`);
     process.exit(1);
   }
 }
