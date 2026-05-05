@@ -509,3 +509,246 @@ export async function sendReminderEmail({ to, cc, name, title, message, link }) 
     return { sent: false, reason: 'send_failed', error: err?.message };
   }
 }
+
+function salesBaseUrl() {
+  return process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173';
+}
+
+function parseTeamEmails(envPrimary, envFallback, csvDefault) {
+  const raw = process.env[envPrimary] || process.env[envFallback] || csvDefault;
+  const all = String(raw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return { to: all[0] || '', cc: all.slice(1).length ? all.slice(1).join(', ') : undefined, all };
+}
+
+/** Technician / sales workflow: notify accounts-style distribution list. */
+export async function sendAccountingRequestEmail({ requestType, ticket, message, requestedBy }) {
+  const { to, cc } = parseTeamEmails(
+    'ACCOUNTS_TEAM_EMAILS',
+    'ACCOUNTS_EMAILS',
+    'wanz@aksuccess.com.my,it@aksuccess.com.my'
+  );
+  if (!to) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'accounting_request',
+      title: 'Accounting request',
+      message: `${requestType}: ${ticket?.ticket_number || ''}`,
+      meta: { reason: 'no_recipients' },
+    });
+    return { sent: false, reason: 'no_recipients' };
+  }
+  const cfg = getSmtpConfig();
+  const subject = `CRM request (${requestType}): ${ticket?.ticket_number || 'Ticket'}`;
+  const text = [
+    `Request type: ${requestType}`,
+    `Ticket: ${ticket?.ticket_number || '—'} — ${ticket?.title || ''}`,
+    requestedBy ? `Requested by: ${requestedBy}` : '',
+    message ? `Message:\n${message}` : '',
+    '',
+    `Open CRM: ${salesBaseUrl()}/sales`,
+    '',
+    'AK Success CRM',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;line-height:1.5;color:#222;">
+    <p><strong>${subject}</strong></p>
+    <p>Ticket: <strong>${ticket?.ticket_number || '—'}</strong> — ${ticket?.title || ''}</p>
+    ${requestedBy ? `<p>Requested by: ${requestedBy}</p>` : ''}
+    ${message ? `<p>${String(message).replace(/\n/g, '<br/>')}</p>` : ''}
+    <p><a href="${salesBaseUrl()}/sales">Open Sales module</a></p>
+  </div>`;
+  if (!cfg.configured) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'accounting_request',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: 'Accounting request',
+      message: text,
+      meta: { reason: 'smtp_not_configured' },
+    });
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: cfg.auth,
+      tls: cfg.tls,
+    });
+    await transporter.sendMail({ from: cfg.from, to, cc, subject, text, html });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'accounting_request',
+      toEmail: to,
+      ccEmail: cc || null,
+      subject,
+      title: 'Accounting request',
+      message: text,
+    });
+    return { sent: true };
+  } catch (err) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'accounting_request',
+      toEmail: to,
+      subject,
+      title: 'Accounting request',
+      message: text,
+      error: err?.message || String(err),
+    });
+    return { sent: false, reason: 'send_failed' };
+  }
+}
+
+export async function sendPurchaseOrderReceivedEmail({ ticket, po, actorName }) {
+  const { to, cc } = parseTeamEmails(
+    'ACCOUNTS_TEAM_EMAILS',
+    'ACCOUNTS_EMAILS',
+    'wanz@aksuccess.com.my,it@aksuccess.com.my'
+  );
+  if (!to) return { sent: false, reason: 'no_recipients' };
+  const cfg = getSmtpConfig();
+  const subject = `PO received: ${po?.po_number || ''} — ${ticket?.ticket_number || ''}`;
+  const text = [
+    `Client PO marked received.`,
+    `PO: ${po?.po_number || '—'}`,
+    `Ticket: ${ticket?.ticket_number || '—'} — ${ticket?.title || ''}`,
+    actorName ? `Updated by: ${actorName}` : '',
+    '',
+    `${salesBaseUrl()}/service`,
+    '',
+    'AK Success CRM',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;"><p><strong>PO received</strong></p>
+    <p>PO: ${po?.po_number || '—'}</p>
+    <p>Ticket: ${ticket?.ticket_number || '—'}</p>
+    <p><a href="${salesBaseUrl()}/service">Open tickets</a></p></div>`;
+  if (!cfg.configured) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'po_received',
+      toEmail: to,
+      subject,
+      title: 'PO received',
+      message: text,
+      meta: { reason: 'smtp_not_configured' },
+    });
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: cfg.auth,
+      tls: cfg.tls,
+    });
+    await transporter.sendMail({ from: cfg.from, to, cc, subject, text, html });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'po_received',
+      toEmail: to,
+      subject,
+      title: 'PO received',
+      message: text,
+    });
+    return { sent: true };
+  } catch (err) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'po_received',
+      toEmail: to,
+      subject,
+      error: err?.message,
+    });
+    return { sent: false };
+  }
+}
+
+export async function sendDeliveryOrderHandoffEmail({ ticket, deliveryOrder, actorName }) {
+  const primary = process.env.OPERATIONS_TEAM_EMAILS || process.env.OPERATIONS_EMAIL;
+  const { to, cc } = parseTeamEmails(
+    'OPERATIONS_TEAM_EMAILS',
+    'OPERATIONS_EMAIL',
+    primary || process.env.ACCOUNTS_TEAM_EMAILS || 'wanz@aksuccess.com.my,it@aksuccess.com.my'
+  );
+  if (!to) return { sent: false, reason: 'no_recipients' };
+  const cfg = getSmtpConfig();
+  const subject = `Delivery order issued: ${deliveryOrder?.delivery_number || ''} — ${ticket?.ticket_number || ''}`;
+  const text = [
+    `A delivery order was issued for operations.`,
+    `DO: ${deliveryOrder?.delivery_number || '—'}`,
+    `Ticket: ${ticket?.ticket_number || '—'} — ${ticket?.title || ''}`,
+    deliveryOrder?.notes ? `Notes: ${deliveryOrder.notes}` : '',
+    actorName ? `Issued by: ${actorName}` : '',
+    '',
+    `${salesBaseUrl()}/sales`,
+    '',
+    'AK Success CRM',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  const html = `<div style="font-family:Arial,sans-serif;"><p><strong>Delivery order — operations</strong></p>
+    <p>DO: ${deliveryOrder?.delivery_number || '—'}</p>
+    <p>Ticket: ${ticket?.ticket_number || '—'}</p>
+    <p><a href="${salesBaseUrl()}/sales">Open Sales</a></p></div>`;
+  if (!cfg.configured) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'skipped',
+      eventType: 'delivery_order_handoff',
+      toEmail: to,
+      subject,
+      title: 'DO issued',
+      message: text,
+      meta: { reason: 'smtp_not_configured' },
+    });
+    return { sent: false, reason: 'smtp_not_configured' };
+  }
+  try {
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: cfg.auth,
+      tls: cfg.tls,
+    });
+    await transporter.sendMail({ from: cfg.from, to, cc, subject, text, html });
+    await logMessageEvent({
+      channel: 'email',
+      status: 'sent',
+      eventType: 'delivery_order_handoff',
+      toEmail: to,
+      subject,
+      title: 'DO issued',
+      message: text,
+    });
+    return { sent: true };
+  } catch (err) {
+    await logMessageEvent({
+      channel: 'email',
+      status: 'failed',
+      eventType: 'delivery_order_handoff',
+      toEmail: to,
+      subject,
+      error: err?.message,
+    });
+    return { sent: false };
+  }
+}
